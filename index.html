@@ -791,34 +791,48 @@ function setDbStatus(status) {
 
 async function checkDbConnection() {
   setDbStatus('checking');
-  // Wait for firebase to load
-  let tries = 0;
-  const check = setInterval(async () => {
-    tries++;
-    if (window._db && window._firebase) {
-      clearInterval(check);
-      try {
-        const { doc, getDoc } = window._firebase;
-        // Try a lightweight read to verify connection
-        await getDoc(doc(window._db, '_ping', 'test'));
+
+  async function tryConnect() {
+    if (!window._db || !window._firebase) {
+      setDbStatus('warn');
+      return;
+    }
+    try {
+      const { doc, getDoc } = window._firebase;
+      await getDoc(doc(window._db, '_ping', 'test'));
+      setDbStatus('ok');
+      state.useFirebase = true;
+    } catch(e) {
+      console.warn('Firebase check:', e.code, e.message);
+      // Any response from Firebase (even errors) means we are connected
+      if (e.code === 'permission-denied' ||
+          e.code === 'not-found' ||
+          e.message?.includes('offline') === false) {
         setDbStatus('ok');
         state.useFirebase = true;
-      } catch(e) {
-        console.warn('Firebase check:', e.code || e.message);
-        // permission-denied means we ARE connected, just no rules yet
-        if (e.code === 'permission-denied' || e.code === 'unavailable') {
-          setDbStatus('ok');
-          state.useFirebase = true;
-        } else {
-          setDbStatus('warn');
-          state.useFirebase = false;
-        }
+      } else {
+        setDbStatus('warn');
+        state.useFirebase = false;
       }
-    } else if (tries > 15) {
-      clearInterval(check);
-      setDbStatus('warn');
     }
-  }, 500);
+  }
+
+  // If Firebase already loaded, try immediately
+  if (window._db && window._firebase) {
+    await tryConnect();
+  } else {
+    // Wait for the firebase-ready event dispatched by the module script
+    document.addEventListener('firebase-ready', async () => {
+      await tryConnect();
+    }, { once: true });
+    // Fallback timeout — if event never fires
+    setTimeout(() => {
+      if (!state.useFirebase) {
+        if (window._db) tryConnect();
+        else setDbStatus('warn');
+      }
+    }, 6000);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
