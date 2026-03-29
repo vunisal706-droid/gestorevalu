@@ -943,6 +943,7 @@ function checkDbConnection() {
         if (snap.val() === true) {
           setDbStatus('ok');
           state.useFirebase = true;
+          syncFromFirebase(); // ← carga datos desde Firebase al conectar
         } else {
           setDbStatus('warn');
           state.useFirebase = false;
@@ -969,6 +970,63 @@ function checkDbConnection() {
       }
     }, 6000);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN DESDE FIREBASE
+// ═══════════════════════════════════════════════════════════════
+function syncFromFirebase() {
+  if (!window._db) return;
+
+  // Prefijo del año activo (ej: "2025-2026")
+  const anyoKey = state.anyo.replace(/\//g, '-').replace(/\./g, '_');
+
+  window._db.ref('evaluaciones').once('value').then(function(snapshot) {
+    const allData = snapshot.val();
+    if (!allData) return;
+
+    let imported = 0;
+    Object.entries(allData).forEach(function([key, record]) {
+      // Las claves tienen formato: "2025-2026_T1_2ep"
+      if (!key.startsWith(anyoKey)) return;
+      if (!record || !record.cursoId || !record.trimestre) return;
+
+      const anyo    = record.anyo  || state.anyo;
+      const trim    = record.trimestre;
+      const cursoId = record.cursoId;
+
+      // Aseguramos que existe la estructura
+      if (!state.datos[anyo])       state.datos[anyo] = {};
+      if (!state.datos[anyo][trim]) state.datos[anyo][trim] = {};
+
+      // Solo sobreescribimos si Firebase tiene datos más recientes
+      const local  = state.datos[anyo][trim][cursoId];
+      const fbDate = record.updatedAt || '';
+      const lcDate = local && local.updatedAt ? local.updatedAt : '';
+
+      if (!local || fbDate > lcDate) {
+        state.datos[anyo][trim][cursoId] = {
+          tipo:      record.tipo,
+          mats:      record.mats,
+          alumnos:   record.alumnos,
+          stats:     record.stats,
+          updatedAt: record.updatedAt
+        };
+        imported++;
+      }
+    });
+
+    if (imported > 0) {
+      saveState();
+      updateInicioDashboard();
+      populateCursosChips();
+      populateInformeSelects();
+      populateComparativaSelects();
+      toast('☁️ ' + imported + ' curso/s sincronizados desde Firebase');
+    }
+  }).catch(function(e) {
+    console.warn('Firebase sync error:', e);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
