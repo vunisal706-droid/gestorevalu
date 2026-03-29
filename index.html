@@ -1163,6 +1163,11 @@ function getFirebaseConfig() {
 // UI HELPERS
 // ═══════════════════════════════════════════════════════════════
 function showSection(id) {
+  // Control de acceso por rol
+  if (currentRol === 'profesorado' && id === 'importar') {
+    if (typeof toast === 'function') toast('⛔ Acceso restringido para el rol Profesorado', true);
+    return;
+  }
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('sec-' + id).classList.add('active');
@@ -1176,7 +1181,14 @@ function showSection(id) {
   if (id==='inicio') updateInicioDashboard();
 }
 
-function showModal(id) { document.getElementById(id).classList.add('open'); }
+function showModal(id) {
+  // Control de acceso por rol
+  if (currentRol === 'profesorado' && id === 'settingsModal') {
+    if (typeof toast === 'function') toast('⛔ Los ajustes solo están disponibles para el superusuario', true);
+    return;
+  }
+  document.getElementById(id).classList.add('open');
+}
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 let _toastTimer;
@@ -3456,26 +3468,6 @@ function applyRolUI() {
   const btnAjustes  = document.getElementById('btnAjustes');
   if (tabImportar) tabImportar.style.display = esProfesado ? 'none' : '';
   if (btnAjustes)  btnAjustes.style.display  = esProfesado ? 'none' : '';
-}
-
-// Sobreescribir showSection para bloquear secciones restringidas
-const _origShowSection = showSection;
-function showSection(id) {
-  if (currentRol === 'profesorado' && (id === 'importar')) {
-    toast('⛔ Acceso restringido para el rol Profesorado', true);
-    return;
-  }
-  _origShowSection(id);
-}
-
-// Sobreescribir showModal para bloquear ajustes al profesorado
-const _origShowModal = showModal;
-function showModal(id) {
-  if (currentRol === 'profesorado' && id === 'settingsModal') {
-    toast('⛔ Los ajustes solo están disponibles para el superusuario', true);
-    return;
-  }
-  _origShowModal(id);
 }
 
 // NO llamar init() en carga automática — se llama tras login exitoso
