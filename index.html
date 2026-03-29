@@ -887,12 +887,12 @@ const CURSOS_CONFIG = {
   '4a':  { label:'4 Años',    tipo:'infantil', mats:['ING','REL','ATEDU','CA','DEE','CRR'] },
   '5a':  { label:'5 Años',    tipo:'infantil', mats:['ING','REL','ATEDU','CA','DEE','CRR'] },
   // Primaria
-  '1ep': { label:'1.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '2ep': { label:'2.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '3ep': { label:'3.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '4ep': { label:'4.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '5ep': { label:'5.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','REL','ATEDU'] },
-  '6ep': { label:'6.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','ALCT','VCE','REL','ATEDU'] },
+  '1ep': { label:'1.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'],           relGroup:['REL','ATEDU'] },
+  '2ep': { label:'2.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'],      relGroup:['REL','REV','ATEDU'] },
+  '3ep': { label:'3.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'],      relGroup:['REL','REV','ATEDU'] },
+  '4ep': { label:'4.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'],      relGroup:['REL','REV','ATEDU'] },
+  '5ep': { label:'5.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','ALCT','REL','ATEDU'], relGroup:['REL','ATEDU'] },
+  '6ep': { label:'6.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','ALCT','VCE','REL','ATEDU'], relGroup:['REL','ATEDU'] },
   // TEA
   'tea': { label:'Aula TEA',  tipo:'tea',      mats:['ACCCI','ACL','ACPMF','REL'] },
 };
@@ -1269,47 +1269,274 @@ async function parseFile() {
   }
 }
 
-// ── Parse DOCX using mammoth ──────────────────────────────────
+// ── Parse DOCX using mammoth (HTML mode para respetar celdas vacías) ──
 async function parseDocx(file, tipo) {
   const arrayBuffer = await file.arrayBuffer();
+
+  // Intentar primero con convertToHtml para respetar estructura de tabla
+  try {
+    const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
+    const html = htmlResult.value;
+
+    // Show raw preview
+    const prev = document.getElementById('imp-preview-raw');
+    prev.style.display='block';
+    prev.textContent = html.replace(/<[^>]+>/g,' ').slice(0,500) + '...';
+
+    const rows = parseDocxHtmlTable(html, tipo);
+    if (rows && rows.length > 0) return rows;
+  } catch(e) {
+    console.warn('HTML parse failed, fallback to text:', e);
+  }
+
+  // Fallback: texto plano
   const result = await mammoth.extractRawText({ arrayBuffer });
   const text = result.value;
-
-  // Show raw preview
   const prev = document.getElementById('imp-preview-raw');
   prev.style.display='block';
   prev.textContent = text.slice(0,500) + (text.length>500?'...':'');
-
   return parseTextTable(text, tipo);
 }
 
-// ── Parse ODT using pandoc-style text extraction ──────────────
+// ── Parsear tabla HTML de mammoth respetando celdas vacías ──
+// Maneja correctamente rowspan/colspan en cabeceras (ej: "RELACIÓN" con colspan=2,
+// y las materias con rowspan=2 que desplazan su índice lógico de columna).
+function parseDocxHtmlTable(html, tipo) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const tables = doc.querySelectorAll('table');
+  if (!tables.length) return null;
+
+  const gradePattern = /^(SB|NT|BI|SU|IN|EXC|BUE|ADE|NAD|BL)$/i;
+  const knownMats = ['ING','REL','REV','ATEDU','CA','DEE','CRR','CMN','LCL','MAT','EFI','EAR','FR2','ALCT','VCE'];
+
+  // Función para obtener el texto limpio de una celda
+  function cellText(td) {
+    return td.textContent.replace(/\s+/g,' ').trim().toUpperCase();
+  }
+
+  // Construir la cuadrícula lógica de la tabla expandiendo colspan/rowspan
+  // Devuelve: array de filas, cada fila es array de {text, col} con índice lógico
+  function buildGrid(table) {
+    const trs = Array.from(table.querySelectorAll('tr'));
+    // grid[row][col] = text
+    const grid = [];
+    // Celdas "pendientes" de rowspan: {col, text, remaining}
+    const pending = [];
+
+    trs.forEach((tr, ri) => {
+      if (!grid[ri]) grid[ri] = [];
+      // Rellenar primero las celdas de rowspan previas
+      pending.forEach(p => {
+        if (p.remaining > 0) {
+          grid[ri][p.col] = p.text;
+          p.remaining--;
+        }
+      });
+      // Ahora colocar las celdas reales de esta fila
+      const tds = Array.from(tr.querySelectorAll('td,th'));
+      let logicalCol = 0;
+      tds.forEach(td => {
+        // Saltar columnas ya ocupadas por rowspan
+        while (grid[ri][logicalCol] !== undefined) logicalCol++;
+        const text = cellText(td);
+        const colspan = parseInt(td.getAttribute('colspan') || '1');
+        const rowspan = parseInt(td.getAttribute('rowspan') || '1');
+        // Rellenar colspan
+        for (let c = 0; c < colspan; c++) {
+          grid[ri][logicalCol + c] = text;
+        }
+        // Registrar rowspan
+        if (rowspan > 1) {
+          for (let c = 0; c < colspan; c++) {
+            pending.push({ col: logicalCol + c, text, remaining: rowspan - 1 });
+          }
+        }
+        logicalCol += colspan;
+      });
+    });
+    return grid;
+  }
+
+  for (const tbl of tables) {
+    const grid = buildGrid(tbl);
+    if (grid.length < 3) continue;
+
+    // Buscar fila de cabecera: la que tenga más materias conocidas
+    let headerRow = -1;
+    let headerColMap = {}; // col lógica → nombre materia
+
+    for (let ri = 0; ri < Math.min(4, grid.length); ri++) {
+      const row = grid[ri] || [];
+      const map = {};
+      row.forEach((text, ci) => {
+        if (knownMats.includes(text)) map[ci] = text;
+      });
+      if (Object.keys(map).length >= 2) {
+        headerRow = ri;
+        headerColMap = map;
+        break;
+      }
+    }
+
+    if (headerRow === -1) continue;
+
+    // Parsear filas de datos
+    const rows = [];
+    for (let ri = headerRow + 1; ri < grid.length; ri++) {
+      const row = grid[ri] || [];
+      // Verificar que la fila tiene al menos una nota válida
+      const hasGrade = row.some(t => t && gradePattern.test(t));
+      if (!hasGrade) continue;
+
+      // Construir notas como objeto {MATERIA: calificacion}
+      const notas = {};
+      Object.entries(headerColMap).forEach(([ci, mat]) => {
+        const val = row[parseInt(ci)] || '';
+        notas[mat] = gradePattern.test(val) ? val.toUpperCase() : '';
+      });
+
+      rows.push({ id: rows.length + 1, notas, _structured: true });
+    }
+
+    if (rows.length > 0) return rows;
+  }
+
+  return null;
+}
 async function parseOdt(file, tipo) {
-  // ODT is a ZIP — extract content.xml
+  // ODT is a ZIP — extract content.xml and parse table structure preserving empty cells
   const arrayBuffer = await file.arrayBuffer();
   try {
-    // Use JSZip if available, otherwise fall back to text parsing
-    const text = await extractOdtText(arrayBuffer);
+    if (!window.JSZip) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+    }
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const contentXml = await zip.file('content.xml').async('string');
+
+    // Parse ODT XML table preserving empty cells
+    const rows = parseOdtXmlTable(contentXml, tipo);
+    if (rows && rows.length > 0) {
+      const prev = document.getElementById('imp-preview-raw');
+      prev.style.display = 'block';
+      prev.textContent = `ODT: ${rows.length} alumnos detectados con estructura de tabla`;
+      return rows;
+    }
+    // fallback to text
+    const text = contentXml.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
     return parseTextTable(text, tipo);
   } catch(e) {
-    // Fallback: try reading as text
+    console.warn('ODT parse error:', e);
     const text = await file.text();
     return parseTextTable(text, tipo);
   }
 }
 
-async function extractOdtText(buf) {
-  // Simple XML text extraction from ODT (ZIP)
-  const bytes = new Uint8Array(buf);
-  const zip = await (async () => {
-    // Load JSZip dynamically
-    if (!window.JSZip) {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+function parseOdtXmlTable(xml, tipo) {
+  // Parse ODT content.xml table structure — handles empty cells (table:covered-table-cell, repeated)
+  const gradePattern = /^(SB|NT|BI|SU|IN|EXC|BUE|ADE|NAD|BL)$/i;
+  const knownMats = ['ING','REL','REV','ATEDU','CA','DEE','CRR','CMN','LCL','MAT','EFI','EAR','FR2','ALCT','VCE'];
+
+  // Use DOMParser to parse the XML
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'text/xml');
+
+  // Find all table:table elements
+  const tables = doc.querySelectorAll('table\\:table, table');
+  if (!tables.length) return null;
+
+  function getCellText(cell) {
+    // Get all text content from a cell, joining paragraphs
+    const paras = cell.querySelectorAll('text\\:p, p');
+    if (paras.length) return Array.from(paras).map(p => p.textContent.trim()).join(' ').trim().toUpperCase();
+    return cell.textContent.trim().toUpperCase();
+  }
+
+  for (const tbl of tables) {
+    // Build grid from ODT table rows
+    const trows = tbl.querySelectorAll('table\\:table-row, table-row');
+    if (!trows.length) continue;
+
+    const grid = [];
+    trows.forEach((tr, ri) => {
+      if (!grid[ri]) grid[ri] = [];
+      // ODT cells: table:table-cell (normal) and table:covered-table-cell (covered by span)
+      const cells = Array.from(tr.children).filter(el =>
+        el.tagName && (el.tagName.includes('table-cell') || el.tagName.includes('covered'))
+      );
+
+      let ci = 0;
+      cells.forEach(cell => {
+        // Skip already-filled positions (from column spans in previous rows — ODT uses covered cells)
+        while (grid[ri][ci] !== undefined) ci++;
+
+        const isCovered = cell.tagName && cell.tagName.includes('covered');
+        const text = isCovered ? '' : getCellText(cell);
+
+        // table:number-columns-repeated
+        const colsRepeated = parseInt(cell.getAttribute('table:number-columns-repeated') || cell.getAttribute('number-columns-repeated') || '1');
+        // table:number-rows-spanned
+        const rowsSpanned = parseInt(cell.getAttribute('table:number-rows-spanned') || cell.getAttribute('number-rows-spanned') || '1');
+
+        for (let c = 0; c < colsRepeated; c++) {
+          grid[ri][ci + c] = text;
+          if (rowsSpanned > 1) {
+            for (let r = 1; r < rowsSpanned; r++) {
+              if (!grid[ri + r]) grid[ri + r] = [];
+              grid[ri + r][ci + c] = text;
+            }
+          }
+        }
+        ci += colsRepeated;
+      });
+    });
+
+    if (grid.length < 3) continue;
+
+    // Find header row with materia names
+    let headerRow = -1;
+    let headerColMap = {};
+    for (let ri = 0; ri < Math.min(4, grid.length); ri++) {
+      const row = grid[ri] || [];
+      const map = {};
+      row.forEach((text, ci) => {
+        if (text && knownMats.includes(text.trim())) map[ci] = text.trim();
+      });
+      if (Object.keys(map).length >= 2) {
+        headerRow = ri;
+        headerColMap = map;
+        break;
+      }
     }
-    return await JSZip.loadAsync(buf);
-  })();
+    if (headerRow === -1) continue;
+
+    // Parse data rows
+    const rows = [];
+    for (let ri = headerRow + 1; ri < grid.length; ri++) {
+      const row = grid[ri] || [];
+      const hasGrade = row.some(t => t && gradePattern.test(t.trim()));
+      if (!hasGrade) continue;
+
+      const notas = {};
+      Object.entries(headerColMap).forEach(([ci, mat]) => {
+        const val = (row[parseInt(ci)] || '').trim().replace(/[*†‡]/g,'');
+        notas[mat] = gradePattern.test(val) ? val.toUpperCase() : '';
+      });
+      rows.push({ id: rows.length + 1, notas, _structured: true });
+    }
+
+    if (rows.length > 0) return rows;
+  }
+  return null;
+}
+
+async function extractOdtText(buf) {
+  // Simple XML text extraction from ODT (ZIP) — legacy fallback
+  if (!window.JSZip) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+  }
+  const zip = await JSZip.loadAsync(buf);
   const contentXml = await zip.file('content.xml').async('string');
-  // Strip XML tags
   return contentXml.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
 }
 
@@ -1393,33 +1620,126 @@ function parseTextTable(text, tipo) {
 }
 
 function buildStudentRows(text, tipo) {
-  // Extract grade sequences from the document
-  // Strategy: find all tokens, then find sequences of grades
-  const allTokens = text.split(/\s+/).map(t => t.trim()).filter(Boolean);
+  // Fallback parser para texto plano (cuando el HTML no está disponible).
+  // Para REL/ATEDU el texto plano NO tiene celda vacía — hay que inferir
+  // qué columna corresponde a cada nota según la cabecera del acta.
+  //
+  // Estrategia: buscar primero la fila de cabecera con los nombres de materias,
+  // luego para cada alumno leer línea a línea emparejando con la cabecera.
+
   const gradePattern = /^(SB|NT|BI|SU|IN|EXC|BUE|ADE|NAD|BL|SB\*|NT\*|BI\*|SU\*|IN\*|ADE\*)$/i;
+  const knownMats = ['ING','REL','REV','ATEDU','CA','DEE','CRR','CMN','LCL','MAT','EFI','EAR','FR2','ALCT','VCE'];
+  const lines = text.split(/[\n\r]+/).map(l => l.trim()).filter(Boolean);
 
-  const rows = [];
-  let currentRow = [];
-  let inDataSection = false;
-  let studentNum = 0;
-
-  for (let i = 0; i < allTokens.length; i++) {
-    const t = allTokens[i];
-    if (/^\d+$/.test(t) && parseInt(t) === studentNum + 1) {
-      if (currentRow.length > 0) {
-        rows.push({ id: studentNum, notas: currentRow });
-        currentRow = [];
-      }
-      studentNum = parseInt(t);
-      inDataSection = true;
-      continue;
-    }
-    if (inDataSection && gradePattern.test(t)) {
-      currentRow.push(cleanGrade(t));
+  // 1. Detectar cabecera de materias
+  let headerCols = null; // array ordenado de nombres de materias según aparecen
+  for (const line of lines) {
+    const tokens = line.split(/\s+/).map(t => t.toUpperCase());
+    const matchCount = tokens.filter(t => knownMats.includes(t)).length;
+    if (matchCount >= 2) {
+      headerCols = tokens.filter(t => knownMats.includes(t));
+      break;
     }
   }
-  if (currentRow.length > 0) rows.push({ id: studentNum, notas: currentRow });
 
+  // 2. Recoger notas por alumno
+  const rows = [];
+  let inDataSection = false;
+  let studentNum = 0;
+  let currentGrades = []; // notas en orden de columna
+
+  for (const line of lines) {
+    const tokens = line.split(/\s+/).map(t => t.trim()).filter(Boolean);
+    if (!tokens.length) continue;
+
+    // Detectar número de alumno (1, 2, 3 ... consecutivos)
+    if (/^\d+$/.test(tokens[0]) && parseInt(tokens[0]) === studentNum + 1) {
+      if (currentGrades.length > 0) {
+        rows.push({ id: studentNum, notas: currentGrades });
+        currentGrades = [];
+      }
+      studentNum = parseInt(tokens[0]);
+      inDataSection = true;
+      // La nota puede estar en la misma línea que el número
+      const lineGrades = tokens.slice(1).filter(t => gradePattern.test(t)).map(cleanGrade);
+      currentGrades.push(...lineGrades);
+      continue;
+    }
+
+    if (inDataSection) {
+      const lineGrades = tokens.filter(t => gradePattern.test(t)).map(cleanGrade);
+      currentGrades.push(...lineGrades);
+    }
+  }
+  if (currentGrades.length > 0) rows.push({ id: studentNum, notas: currentGrades });
+
+  // 3. Si tenemos cabecera con REL/REV y ATEDU, reconstruir como objeto estructurado
+  //    para que las posiciones vacías se respeten
+  if (headerCols && (headerCols.includes('REL') || headerCols.includes('ATEDU') || headerCols.includes('REV'))) {
+    const relIdx   = headerCols.indexOf('REL');
+    const revIdx   = headerCols.indexOf('REV');
+    const ateduIdx = headerCols.indexOf('ATEDU');
+
+    return rows.map((row, i) => {
+      // Texto plano colapsa celdas vacías: un alumno con ATEDU tiene N-1 notas
+      // (falta REL), y uno con REL tiene N-1 notas (falta ATEDU).
+      // Detectamos cuál falta mirando si la nota en posición relIdx/ateduIdx
+      // tiene sentido, o si el total de notas es menor que headerCols.length.
+      const notas = {};
+      const expected = headerCols.length;
+      const got = row.notas.length;
+
+      if (got >= expected) {
+        // Tenemos todas las columnas — asignar directamente
+        headerCols.forEach((mat, ci) => { notas[mat] = row.notas[ci] || ''; });
+      } else {
+        // Faltan columnas — la(s) celda(s) vacías son las de religión/atedu.
+        // Con REL+REV+ATEDU pueden faltar 2 notas. Probamos cada opción.
+        const relCols = [relIdx, revIdx, ateduIdx].filter(i => i !== -1).sort((a,b)=>a-b);
+        
+        // Generar candidatos: insertar '' en cada posición de relCols que pueda faltar
+        let bestNotas = null;
+        
+        // Intentar todas las combinaciones de columnas vacías
+        const missingCount = expected - got;
+        function tryInsert(notasArr, holes) {
+          const result = [...notasArr];
+          holes.slice().sort((a,b)=>b-a).forEach(pos => result.splice(pos, 0, ''));
+          return result;
+        }
+        
+        // Generar combinaciones de 'missingCount' posiciones entre relCols
+        function combinations(arr, k) {
+          if (k === 0) return [[]];
+          if (arr.length < k) return [];
+          const [head, ...tail] = arr;
+          return [...combinations(tail, k-1).map(c => [head,...c]), ...combinations(tail, k)];
+        }
+        
+        const candidates = combinations(relCols, missingCount);
+        for (const holes of candidates) {
+          const filled = tryInsert(row.notas, holes);
+          if (filled.length === expected) {
+            const n = {};
+            headerCols.forEach((mat, ci) => { n[mat] = filled[ci] || ''; });
+            // Validar: exactamente las posiciones de relCols que NO están en holes deben tener nota válida
+            const filledRelCols = relCols.filter(c => !holes.includes(c));
+            const emptyRelCols  = relCols.filter(c => holes.includes(c));
+            const filledOk = filledRelCols.every(c => gradePattern.test(filled[c]||''));
+            const emptyOk  = emptyRelCols.every(c => !(filled[c]||''));
+            if (filledOk && emptyOk) { bestNotas = n; break; }
+          }
+        }
+        
+        if (bestNotas) Object.assign(notas, bestNotas);
+        else headerCols.forEach((mat, ci) => { notas[mat] = row.notas[ci] || ''; });
+      }
+
+      return { id: i + 1, notas, _structured: true };
+    });
+  }
+
+  // Sin cabecera detectada: devolver formato array legacy
   return rows;
 }
 
@@ -1445,6 +1765,15 @@ function parsePdfTextTEA(text, tipo) {
 // ═══════════════════════════════════════════════════════════════
 // IMPORT PREVIEW TABLE
 // ═══════════════════════════════════════════════════════════════
+// Obtener nota de una fila (compatible con formato objeto {MAT:val} y array [val])
+function getNotaFromRow(row, mat, mi) {
+  if (row._structured && row.notas && typeof row.notas === 'object' && !Array.isArray(row.notas)) {
+    return row.notas[mat] || '';
+  }
+  // Formato legacy: array
+  return (Array.isArray(row.notas) ? row.notas[mi] : '') || '';
+}
+
 function renderImportPreview(rows, tipo, cursoId) {
   const cfg = CURSOS_CONFIG[cursoId];
   const mats = cfg ? cfg.mats : [];
@@ -1457,11 +1786,14 @@ function renderImportPreview(rows, tipo, cursoId) {
     return;
   }
 
-  // Check for issues
+  // Verificar calificaciones (para formato estructurado no hacer advertencia de longitud)
   let warnings = [];
   rows.forEach((r,i) => {
-    if (r.notas.length < mats.filter(m=>m!=='REL'&&m!=='ATEDU').length) {
-      warnings.push(`Alumno ${i+1}: ${r.notas.length} notas detectadas (esperadas ~${mats.length})`);
+    if (!r._structured && Array.isArray(r.notas)) {
+      const coreCount = mats.filter(m=>m!=='REL'&&m!=='REV'&&m!=='ATEDU').length;
+      if (r.notas.length < coreCount) {
+        warnings.push(`Alumno ${i+1}: ${r.notas.length} notas detectadas (esperadas ~${mats.length})`);
+      }
     }
   });
 
@@ -1472,10 +1804,47 @@ function renderImportPreview(rows, tipo, cursoId) {
     warn.style.display='none';
   }
 
+  // Validar suma REL+REV+ATEDU si el curso los tiene
+  const relGroup = cfg.relGroup || [];
+  const relGroupInMats = relGroup.filter(m => mats.includes(m));
+  if (relGroupInMats.length > 1) {
+    const totals = {};
+    relGroupInMats.forEach(m => { totals[m] = 0; });
+    rows.forEach(row => {
+      relGroupInMats.forEach(m => {
+        const v = getNotaFromRow(row, m, mats.indexOf(m));
+        if (v) totals[m]++;
+      });
+    });
+    const suma = Object.values(totals).reduce((a,b)=>a+b,0);
+    const total = rows.length;
+    const sumInfo = relGroupInMats.map(m=>`${m}:${totals[m]}`).join(' + ');
+    const relWarnDiv = document.getElementById('imp-rel-warn') || (() => {
+      const d = document.createElement('div');
+      d.id = 'imp-rel-warn';
+      d.style.cssText = 'margin-top:8px;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600';
+      warn.parentNode.insertBefore(d, warn.nextSibling);
+      return d;
+    })();
+    if (suma === total) {
+      relWarnDiv.style.background = 'var(--verdeC)';
+      relWarnDiv.style.color = 'var(--verdeM)';
+      relWarnDiv.style.border = '1px solid var(--verdeM)';
+      relWarnDiv.innerHTML = `✅ ${relGroupInMats.join('+')} cuadran: ${sumInfo} = ${total} alumnos`;
+    } else {
+      relWarnDiv.style.background = 'var(--ambarC)';
+      relWarnDiv.style.color = '#7B4F00';
+      relWarnDiv.style.border = '1px solid var(--ambar)';
+      relWarnDiv.innerHTML = `⚠️ ${relGroupInMats.join('+')} no cuadran: ${sumInfo} = ${suma} (total: ${total} alumnos)`;
+    }
+    relWarnDiv.style.display = 'block';
+  } else {
+    const old = document.getElementById('imp-rel-warn');
+    if (old) old.style.display = 'none';
+  }
+
   // Render editable table
   const grades = gradeList(tipo);
-  const gradeOpts = grades.map(g => `<option value="${g}">${g}</option>`).join('') +
-    '<option value="">—</option>';
 
   let html = `<table><thead><tr><th>Nº</th>` +
     mats.map(m => `<th>${m}</th>`).join('') + `</tr></thead><tbody>`;
@@ -1483,12 +1852,12 @@ function renderImportPreview(rows, tipo, cursoId) {
   rows.forEach((row, ri) => {
     html += `<tr><td>${ri+1}</td>`;
     mats.forEach((mat, mi) => {
-      const val = row.notas[mi] || '';
+      const val = getNotaFromRow(row, mat, mi);
       const cls = val ? `g-${val}` : 'g-empty';
-      html += `<td><select class="grade-sel" data-row="${ri}" data-mat="${mi}"
+      html += `<td><select class="grade-sel" data-row="${ri}" data-mat="${mat}"
         style="border:none;background:transparent;font-weight:700;font-size:12px;
         color:inherit;cursor:pointer;padding:2px 4px;border-radius:4px"
-        onchange="updateParsedGrade(${ri},${mi},this.value)">
+        onchange="updateParsedGrade(${ri},'${mat}',this.value)">
         ${grades.map(g=>`<option value="${g}" ${g===val?'selected':''}>${g}</option>`).join('')}
         <option value="" ${!val?'selected':''}>—</option>
       </select></td>`;
@@ -1500,9 +1869,13 @@ function renderImportPreview(rows, tipo, cursoId) {
   document.getElementById('imp-table-wrap').innerHTML = html;
 }
 
-function updateParsedGrade(ri, mi, val) {
-  if (state.imp.parsed && state.imp.parsed.rows[ri]) {
-    state.imp.parsed.rows[ri].notas[mi] = val;
+function updateParsedGrade(ri, matOrIdx, val) {
+  if (!state.imp.parsed || !state.imp.parsed.rows[ri]) return;
+  const row = state.imp.parsed.rows[ri];
+  if (row._structured) {
+    row.notas[matOrIdx] = val;
+  } else {
+    row.notas[matOrIdx] = val;
   }
 }
 
@@ -1517,7 +1890,7 @@ function saveImport() {
   // Build structured students array
   const alumnos = rows.map((row, i) => {
     const notas = {};
-    mats.forEach((mat, mi) => { notas[mat] = row.notas[mi] || ''; });
+    mats.forEach((mat, mi) => { notas[mat] = getNotaFromRow(row, mat, mi); });
     return { id: 'a' + (i+1), num: i+1, notas };
   });
 
@@ -1563,10 +1936,15 @@ function computeStats(alumnos, mats, tipo) {
   const matStats = {};
   mats.forEach(m => { matStats[m] = {}; });
 
+  // REL, REV y ATEDU son mutuamente excluyentes: cada alumno va a una de las tres.
+  const hasREL   = mats.includes('REL');
+  const hasREV   = mats.includes('REV');
+  const hasATEDU = mats.includes('ATEDU');
+
   alumnos.forEach(a => {
     mats.forEach(m => {
       const g = a.notas[m];
-      if (!g) return; // No cursa
+      if (!g) return; // No cursa esta materia
       counts[g] = (counts[g]||0) + 1;
       matStats[m][g] = (matStats[m][g]||0) + 1;
       total++;
@@ -1575,7 +1953,12 @@ function computeStats(alumnos, mats, tipo) {
     });
   });
 
-  return { counts, total, pos, neg, matStats, posGrades: [...posGrades], negGrades: [...negGrades] };
+  // numAlumnos = total real de alumnos en clase
+  const numAlumnos = alumnos.length;
+
+  return { counts, total, pos, neg, matStats,
+           posGrades: [...posGrades], negGrades: [...negGrades],
+           numAlumnos, hasREL, hasREV, hasATEDU };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1644,10 +2027,24 @@ function selectCurso(cursoId) {
   kpiHtml += `</div>`;
 
   // Materia table
+  // REL, REV y ATEDU son complementarias: nota informativa al pie
+  const relGroup = cfg.relGroup || ['REL','ATEDU'];
+  const relGroupPresent = relGroup.filter(m => c.mats.includes(m));
+  const relAteduNote = (relGroupPresent.length > 1) ?
+    `<div style="font-size:11px;color:var(--gris);margin-top:6px;padding:6px 10px;background:var(--ambarC);border-radius:6px;border-left:3px solid var(--ambar)">
+      &#x2139;&#xFE0F; <strong>${relGroupPresent.join(' + ')}</strong>: asignaturas complementarias &mdash; la suma de sus alumnos debe ser = total en clase (${stats.numAlumnos} alumnos).
+      ${(() => {
+        const sum = relGroupPresent.reduce((s,m) => s + Object.values(stats.matStats[m]||{}).reduce((a,b)=>a+b,0), 0);
+        return sum === stats.numAlumnos
+          ? `<span style="color:var(--verde)">✅ Cuadra (${sum}/${stats.numAlumnos})</span>`
+          : `<span style="color:var(--rojo)">⚠️ No cuadra: suma ${sum} ≠ ${stats.numAlumnos} alumnos</span>`;
+      })()}
+    </div>` : '';
+
   let tblHtml = `<div class="card"><div class="card-title">📊 Por materia</div>
     <div class="table-wrap"><table>
     <thead><tr><th>Materia</th>` + grades.map(g=>`<th>${g}</th>`).join('') +
-    `<th>% Pos</th></tr></thead><tbody>`;
+    `<th>Alumnos</th><th>% Pos</th></tr></thead><tbody>`;
 
   c.mats.forEach(mat => {
     const ms = stats.matStats[mat] || {};
@@ -1655,16 +2052,17 @@ function selectCurso(cursoId) {
     const matPos = grades.filter(g => stats.posGrades.includes(g))
       .reduce((a,g) => a+(ms[g]||0), 0);
     const matPct = matTotal ? Math.round(matPos/matTotal*100) : 0;
-    const alert = stats.negGrades.length && matTotal ?
-      (grades.filter(g=>stats.negGrades.includes(g)).reduce((a,g)=>a+(ms[g]||0),0)/matTotal*100) : 0;
-    tblHtml += `<tr><td>${mat}</td>` +
+    const isRelAtedu = relGroupPresent.includes(mat) && relGroupPresent.length > 1;
+    const rowStyle = isRelAtedu ? ' style="background:var(--ambarC)"' : '';
+    tblHtml += `<tr${rowStyle}><td>${mat}${isRelAtedu ? ' <small style="color:var(--ambar);font-size:10px">&#x2756;</small>' : ''}</td>` +
       grades.map(g => {
         const v = ms[g]||0;
         return v ? `<td><span class="pill g-${g}">${v}</span></td>` : '<td>—</td>';
       }).join('') +
-      `<td style="font-weight:700;color:${matPct>=80?'var(--verdeM)':'var(--rojo)'}">${matPct}%</td></tr>`;
+      `<td style="font-weight:700">${matTotal || '—'}</td>` +
+      `<td style="font-weight:700;color:${matPct>=80?'var(--verdeM)':'var(--rojo)'}">${matTotal ? matPct+'%' : '—'}</td></tr>`;
   });
-  tblHtml += `</tbody></table></div></div>`;
+  tblHtml += `</tbody></table></div>${relAteduNote}</div>`;
 
   // Students table
   let stuHtml = `<div class="card"><div class="card-title">👨‍🎓 Alumnos (${c.alumnos.length})</div>
