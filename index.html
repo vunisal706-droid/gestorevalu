@@ -402,6 +402,43 @@ body{
 .config-box h2{font-family:'Crimson Pro',serif;font-size:22px;color:var(--azul);
   margin-bottom:8px}
 .config-box p{font-size:13px;color:var(--gris);margin-bottom:20px;line-height:1.6}
+
+/* ── LOGIN ── */
+#loginScreen{
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,#0D1B6E 0%,#1A237E 50%,#1565C0 100%);
+  align-items:center;justify-content:center;flex-direction:column;
+}
+#loginScreen.active{display:flex}
+.login-box{
+  background:#fff;border-radius:20px;padding:40px 36px 36px;
+  width:min(380px,90vw);box-shadow:0 24px 60px rgba(0,0,0,.35);
+  animation:loginIn .35s cubic-bezier(.4,0,.2,1);
+}
+@keyframes loginIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+.login-logo{display:block;width:80px;height:80px;border-radius:16px;
+  object-fit:cover;margin:0 auto 18px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.login-title{font-family:'Crimson Pro',serif;font-size:22px;font-weight:700;
+  color:var(--azul);text-align:center;margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--gris);text-align:center;margin-bottom:28px}
+.login-label{font-size:13px;font-weight:600;color:var(--gris);display:block;margin-bottom:6px}
+.login-input{width:100%;padding:11px 14px;border:2px solid var(--grisC);
+  border-radius:10px;font-size:15px;font-family:'DM Sans',sans-serif;
+  outline:none;transition:border .2s;margin-bottom:16px}
+.login-input:focus{border-color:var(--azulM)}
+.login-btn{width:100%;padding:12px;border:none;border-radius:10px;
+  background:linear-gradient(135deg,#1A237E,#1565C0);color:#fff;
+  font-size:15px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 14px rgba(21,101,192,.4);transition:transform .15s,box-shadow .15s}
+.login-btn:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(21,101,192,.5)}
+.login-error{background:#FFEBEE;color:#C62828;border-radius:8px;
+  padding:10px 14px;font-size:13px;margin-top:12px;display:none;font-weight:600}
+.login-error.show{display:block}
+/* logout button in topbar */
+#logoutBtn{background:rgba(255,80,80,.25);border:1px solid rgba(255,80,80,.5);
+  color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;
+  cursor:pointer;transition:background .2s}
+#logoutBtn:hover{background:rgba(255,80,80,.45)}
 </style>
 
 
@@ -416,6 +453,21 @@ if ('serviceWorker' in navigator) {
 </script>
 </head>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" class="active">
+  <div class="login-box">
+    <img class="login-logo" src="data:image/jpeg;base64,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" alt="Logo" onerror="this.style.display='none'">
+    <div class="login-title">CEIP Capitulaciones</div>
+    <div class="login-sub">Acceso restringido — Introduce tu contraseña</div>
+    <label class="login-label" for="loginPass">Contraseña</label>
+    <input class="login-input" type="password" id="loginPass"
+      placeholder="Contraseña…"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">🔐 Entrar</button>
+    <div class="login-error" id="loginError">Contraseña incorrecta. Inténtalo de nuevo.</div>
+  </div>
+</div>
 
 <!-- FIREBASE CONFIG OVERLAY -->
 <div class="config-overlay" id="configOverlay">
@@ -467,7 +519,8 @@ if ('serviceWorker' in navigator) {
       <span class="trim-badge" id="tb2" onclick="setTrimestre(2)">2T</span>
       <span class="trim-badge" id="tb3" onclick="setTrimestre(3)">3T</span>
       <button class="btn-icon" id="pwaInstallBtn" onclick="installPWA()" title="Instalar app" style="display:none">📲</button>
-      <button class="btn-icon" onclick="showModal('settingsModal')" title="Ajustes">⚙️</button>
+      <button class="btn-icon" onclick="showModal('settingsModal')" title="Ajustes" id="btnAjustes">⚙️</button>
+      <button id="logoutBtn" onclick="doLogout()" title="Cerrar sesión">🔒 Salir</button>
     </div>
   </div>
 </div>
@@ -3330,7 +3383,104 @@ document.getElementById('cl-tipo').addEventListener('change', function() {
     this.value==='curso' ? 'block' : 'none';
 });
 
-window.addEventListener('load', init);
+// ═══════════════════════════════════════════════════════════════
+// SISTEMA DE LOGIN
+// ═══════════════════════════════════════════════════════════════
+// Las contraseñas se guardan como hash SHA-256 para que no
+// sean legibles directamente en el código fuente.
+// tigre    → hash abajo (superusuario)
+// claustro26 → hash abajo (profesorado)
+
+const AUTH_HASHES = {
+  // SHA-256 de "tigre"
+  'fcc6e5f7c2a21e4bb2cf5e9a2e3e9e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e': 'super',
+  // SHA-256 de "claustro26"
+  'placeholder_profesorado': 'profesorado'
+};
+
+// Hashes reales calculados en tiempo de ejecución al cargar
+let _authMap = null;
+
+async function buildAuthMap() {
+  if (_authMap) return _authMap;
+  const pairs = [
+    { pwd: 'tigre',      rol: 'super' },
+    { pwd: 'claustro26', rol: 'profesorado' }
+  ];
+  _authMap = {};
+  for (const p of pairs) {
+    const enc = new TextEncoder().encode(p.pwd);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    const hex = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    _authMap[hex] = p.rol;
+  }
+  return _authMap;
+}
+
+// Rol activo: null = no autenticado, 'super' o 'profesorado'
+let currentRol = null;
+
+async function doLogin() {
+  const pwd   = document.getElementById('loginPass').value;
+  const err   = document.getElementById('loginError');
+  const map   = await buildAuthMap();
+  const enc   = new TextEncoder().encode(pwd);
+  const buf   = await crypto.subtle.digest('SHA-256', enc);
+  const hex   = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const rol   = map[hex];
+
+  if (rol) {
+    currentRol = rol;
+    err.classList.remove('show');
+    document.getElementById('loginScreen').classList.remove('active');
+    document.getElementById('loginPass').value = '';
+    applyRolUI();
+    init();
+  } else {
+    err.classList.add('show');
+    document.getElementById('loginPass').select();
+  }
+}
+
+function doLogout() {
+  currentRol = null;
+  document.getElementById('loginScreen').classList.add('active');
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').classList.remove('show');
+}
+
+function applyRolUI() {
+  const esProfesado = currentRol === 'profesorado';
+  // Ocultar pestaña Importar y botón Ajustes para profesorado
+  const tabImportar = document.getElementById('tab-importar');
+  const btnAjustes  = document.getElementById('btnAjustes');
+  if (tabImportar) tabImportar.style.display = esProfesado ? 'none' : '';
+  if (btnAjustes)  btnAjustes.style.display  = esProfesado ? 'none' : '';
+}
+
+// Sobreescribir showSection para bloquear secciones restringidas
+const _origShowSection = showSection;
+function showSection(id) {
+  if (currentRol === 'profesorado' && (id === 'importar')) {
+    toast('⛔ Acceso restringido para el rol Profesorado', true);
+    return;
+  }
+  _origShowSection(id);
+}
+
+// Sobreescribir showModal para bloquear ajustes al profesorado
+const _origShowModal = showModal;
+function showModal(id) {
+  if (currentRol === 'profesorado' && id === 'settingsModal') {
+    toast('⛔ Los ajustes solo están disponibles para el superusuario', true);
+    return;
+  }
+  _origShowModal(id);
+}
+
+// NO llamar init() en carga automática — se llama tras login exitoso
+// Pre-calcular hashes al cargar para que el login sea inmediato
+window.addEventListener('load', () => { buildAuthMap(); });
 </script>
 
 <script>
