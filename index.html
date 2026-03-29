@@ -2108,67 +2108,275 @@ function generateActaForCurso(cursoId) {
   const cfg = CURSOS_CONFIG[cursoId];
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF('l','mm','a4');
-
-  const w = doc.internal.pageSize.getWidth();
-  const h = doc.internal.pageSize.getHeight();
-
-  // Header
-  doc.setFillColor(26,35,126);
-  doc.rect(0,0,w,20,'F');
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(12);
-  doc.setFont('helvetica','bold');
-  doc.text('CEIP CAPITULACIONES DE SANTA FE — ACTA DE EVALUACIÓN', w/2, 8, {align:'center'});
-  doc.setFontSize(10);
-  doc.text(`${cfg.label} · ${TRIM_NAMES[state.trimestre]} · ${state.anyo}`, w/2, 14, {align:'center'});
-
-  doc.setTextColor(0,0,0);
-
-  // Table
+  const w = doc.internal.pageSize.getWidth();   // 297
+  const h = doc.internal.pageSize.getHeight();  // 210
+  const TRIM = state.trimestre;
   const grades = gradeList(c.tipo);
-  const head = [['Nº', ...c.mats]];
-  const body = c.alumnos.map((a,i) => [
+  const s = c.stats;
+
+  const GRADE_COLORS = {
+    SB:[21,101,192], NT:[46,125,50], BI:[245,127,23],
+    SU:[230,81,0],   IN:[198,40,40],
+    EXC:[21,101,192],BUE:[46,125,50],ADE:[245,127,23],NAD:[198,40,40]
+  };
+
+  function pct(n,d){ return d ? Math.round(n/d*100) : 0; }
+  function semaforo(p){ return p>=85?'EXCELENTE':p>=75?'BUENO':p>=60?'MEJORABLE':p>=50?'PREOCUPANTE':'CRÍTICO'; }
+
+  // ── Función de cabecera reutilizable ─────────────────────────
+  function addHeader(pageNum) {
+    doc.setFillColor(26,35,126);
+    doc.rect(0,0,w,18,'F');
+    doc.setFillColor(21,101,192);
+    doc.rect(0,18,w,5,'F');
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(11); doc.setFont('helvetica','bold');
+    doc.text('CEIP CAPITULACIONES DE SANTA FE — ACTA DE EVALUACIÓN', w/2, 8, {align:'center'});
+    doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text(`${cfg.label}  ·  ${TRIM_NAMES[TRIM]}  ·  Curso ${state.anyo}`, w/2, 15, {align:'center'});
+    doc.setTextColor(255,255,255); doc.setFontSize(7);
+    doc.text(`Página ${pageNum}`, w-8, 21.5, {align:'right'});
+    doc.setTextColor(0,0,0);
+  }
+
+  // ════════════════════════════════════════════════════════
+  // PÁGINA 1 — TABLA NOMINAL DE CALIFICACIONES
+  // ════════════════════════════════════════════════════════
+  addHeader(1);
+
+  const head1 = [['Nº', ...c.mats]];
+  const body1 = c.alumnos.map((a,i) => [
     String(i+1),
     ...c.mats.map(m => a.notas[m] || '—')
   ]);
 
   doc.autoTable({
-    head, body,
-    startY: 24,
-    styles: { fontSize:9, halign:'center', cellPadding:2 },
-    headStyles: { fillColor:[26,35,126], textColor:255, fontStyle:'bold' },
-    columnStyles: { 0: { halign:'center', cellWidth:12 } },
-    alternateRowStyles: { fillColor:[240,242,249] },
-    didParseCell: function(data) {
-      if (data.section === 'body' && data.column.index > 0) {
-        const v = data.cell.raw;
-        const colors = {SB:[21,101,192],NT:[46,125,50],BI:[245,127,23],
-          SU:[230,81,0],IN:[198,40,40],EXC:[21,101,192],BUE:[46,125,50],
-          ADE:[245,127,23],NAD:[198,40,40]};
-        if (colors[v]) {
-          data.cell.styles.textColor = colors[v];
-          data.cell.styles.fontStyle = 'bold';
+    head: head1, body: body1,
+    startY: 26,
+    styles: { fontSize:8.5, halign:'center', cellPadding:2.2, lineColor:[210,215,230], lineWidth:0.2 },
+    headStyles: { fillColor:[26,35,126], textColor:255, fontStyle:'bold', fontSize:8 },
+    columnStyles: { 0:{ halign:'center', cellWidth:10, fontStyle:'bold' } },
+    alternateRowStyles: { fillColor:[245,247,252] },
+    didParseCell: function(d) {
+      if (d.section==='body' && d.column.index>0) {
+        const v = d.cell.raw;
+        if (GRADE_COLORS[v]) { d.cell.styles.textColor=GRADE_COLORS[v]; d.cell.styles.fontStyle='bold'; }
+        if (v==='—') d.cell.styles.textColor=[180,180,180];
+      }
+    },
+    margin:{ top:26, left:10, right:10 }
+  });
+
+  // Pie página 1: distribución rápida
+  let fY = doc.lastAutoTable.finalY + 5;
+  if (fY > h-18) { fY = h-18; }
+  doc.setFillColor(240,242,249); doc.rect(10,fY,w-20,12,'F');
+  doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.setTextColor(26,35,126);
+  doc.text('DISTRIBUCIÓN:', 14, fY+5);
+  doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+  let xf = 52;
+  grades.forEach(g => {
+    if (GRADE_COLORS[g]) doc.setTextColor(...GRADE_COLORS[g]); else doc.setTextColor(100,100,100);
+    doc.setFont('helvetica','bold');
+    doc.text(`${g}: ${s.counts[g]||0}`, xf, fY+5);
+    xf += 28;
+  });
+  doc.setTextColor(46,125,50); doc.setFont('helvetica','bold');
+  doc.text(`✓ ${pct(s.pos,s.total)}% POSITIVOS`, xf+4, fY+5);
+  doc.setTextColor(198,40,40);
+  const negPct = pct(s.neg,s.total);
+  if (negPct>0) doc.text(`✗ ${negPct}% NEGATIVOS`, xf+60, fY+5);
+  doc.setTextColor(80,80,80); doc.setFont('helvetica','normal');
+  doc.text(`Total calificaciones: ${s.total}  |  Alumnado: ${c.alumnos.length}  |  Valoración: ${semaforo(pct(s.pos,s.total))}`, 14, fY+10);
+
+  // ════════════════════════════════════════════════════════
+  // PÁGINA 2 — ESTADÍSTICAS POR MATERIA
+  // ════════════════════════════════════════════════════════
+  doc.addPage();
+  addHeader(2);
+
+  doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(26,35,126);
+  doc.text('ANÁLISIS ESTADÍSTICO POR MATERIA', 14, 28);
+  doc.setTextColor(0,0,0);
+
+  const pos = c.tipo==='primaria' ? ['SB','NT','BI','SU'] : c.tipo==='infantil' ? ['EXC','BUE','ADE'] : ['BUE','ADE'];
+  const neg2 = c.tipo==='primaria' ? ['IN'] : c.tipo==='infantil' ? ['NAD'] : [];
+
+  const headMat = [['Materia', ...grades, 'Total', '% Pos', '% Neg', 'Nota top', 'Valoración']];
+  const bodyMat = c.mats.map(mat => {
+    const ms = s.matStats[mat]||{};
+    const mt = Object.values(ms).reduce((a,b)=>a+b,0);
+    const mp = pos.reduce((a,g)=>a+(ms[g]||0),0);
+    const mn = neg2.reduce((a,g)=>a+(ms[g]||0),0);
+    const topG = grades.reduce((best,g)=>(ms[g]||0)>(ms[best]||0)?g:best, grades[0]);
+    return [
+      mat,
+      ...grades.map(g=>String(ms[g]||0)),
+      String(mt),
+      mt?pct(mp,mt)+'%':'—',
+      mt&&mn?pct(mn,mt)+'%':'0%',
+      topG,
+      semaforo(mt?pct(mp,mt):0)
+    ];
+  });
+
+  // Fila de totales
+  bodyMat.push([
+    'TOTAL',
+    ...grades.map(g=>String(s.counts[g]||0)),
+    String(s.total),
+    pct(s.pos,s.total)+'%',
+    pct(s.neg,s.total)+'%',
+    '—',
+    semaforo(pct(s.pos,s.total))
+  ]);
+
+  doc.autoTable({
+    head: headMat, body: bodyMat,
+    startY: 32,
+    styles: { fontSize:8, halign:'center', cellPadding:2 },
+    headStyles: { fillColor:[21,101,192], textColor:255, fontStyle:'bold', fontSize:7.5 },
+    columnStyles: { 0:{ halign:'left', fontStyle:'bold', cellWidth:22 } },
+    alternateRowStyles: { fillColor:[245,247,252] },
+    didParseCell: function(d) {
+      if (d.section==='body') {
+        const lastRow = d.row.index === bodyMat.length-1;
+        if (lastRow) { d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[230,235,255]; }
+        // Colorear % pos y % neg
+        const colIdx = d.column.index;
+        const grLen = grades.length;
+        if (colIdx === grLen+2) { // % Pos
+          const p=parseInt(d.cell.raw);
+          if(!isNaN(p)) d.cell.styles.textColor=p>=80?[46,125,50]:[198,40,40];
+          d.cell.styles.fontStyle='bold';
+        }
+        if (colIdx === grLen+3) { // % Neg
+          const p=parseInt(d.cell.raw);
+          if(!isNaN(p)&&p>0) d.cell.styles.textColor=[198,40,40];
+          d.cell.styles.fontStyle='bold';
+        }
+        // Valoración semáforo
+        if (colIdx === grLen+5) {
+          const v=d.cell.raw;
+          if(v==='EXCELENTE') d.cell.styles.textColor=[21,101,192];
+          else if(v==='BUENO') d.cell.styles.textColor=[46,125,50];
+          else if(v==='MEJORABLE') d.cell.styles.textColor=[245,127,23];
+          else if(v==='PREOCUPANTE'||v==='CRÍTICO') d.cell.styles.textColor=[198,40,40];
+          d.cell.styles.fontStyle='bold';
         }
       }
-    }
+    },
+    margin:{ left:10, right:10 }
   });
 
-  // Stats footer
-  const finalY = doc.lastAutoTable.finalY + 6;
-  const stats = c.stats;
-  const grades2 = gradeList(c.tipo);
-  let x = 14;
-  doc.setFontSize(8);
-  grades2.forEach(g => {
-    doc.text(`${g}: ${stats.counts[g]||0}`, x, finalY);
-    x += 22;
-  });
-  doc.text(`POSITIVOS: ${Math.round(stats.pos/stats.total*100)}%`, x, finalY);
+  // ════════════════════════════════════════════════════════
+  // PÁGINA 3 — TABLA DE NEGATIVOS + RANKING MATERIAS + DILIGENCIA
+  // ════════════════════════════════════════════════════════
+  doc.addPage();
+  addHeader(3);
 
-  doc.save(`Acta_${cfg.label.replace(/\.\s/g,'')}_T${state.trimestre}_${state.anyo.replace('/','_')}.pdf`);
-  toast('📄 Acta generada y descargada');
+  let y3 = 28;
+
+  // — Alumnado con calificaciones negativas
+  doc.setFontSize(9.5); doc.setFont('helvetica','bold'); doc.setTextColor(198,40,40);
+  doc.text('ALUMNADO CON CALIFICACIONES NEGATIVAS', 14, y3);
+  doc.setTextColor(0,0,0);
+  y3 += 5;
+
+  const alumNeg = c.alumnos
+    .map((a,i)=>({ num:i+1, materias:c.mats.filter(m=>neg2.includes(a.notas[m])), notas:a.notas }))
+    .filter(a=>a.materias.length>0);
+
+  if (alumNeg.length===0) {
+    doc.setFillColor(232,245,233); doc.rect(10,y3,w-20,10,'F');
+    doc.setTextColor(46,125,50); doc.setFontSize(9); doc.setFont('helvetica','bold');
+    doc.text('✓ Ningún alumno/a presenta calificaciones negativas en este trimestre', w/2, y3+6, {align:'center'});
+    doc.setTextColor(0,0,0);
+    y3 += 16;
+  } else {
+    const headNeg = [['Nº Alumno', 'Materias con negativo', 'Nº materias']];
+    const bodyNeg = alumNeg.map(a=>[
+      `Alumno ${a.num}`,
+      a.materias.join(', '),
+      String(a.materias.length)
+    ]);
+    doc.autoTable({
+      head:headNeg, body:bodyNeg, startY:y3,
+      headStyles:{ fillColor:[198,40,40], textColor:255, fontStyle:'bold', fontSize:8 },
+      bodyStyles:{ fontSize:8.5 },
+      columnStyles:{ 0:{cellWidth:28,halign:'center'}, 2:{cellWidth:22,halign:'center'} },
+      alternateRowStyles:{ fillColor:[255,245,245] },
+      margin:{ left:10, right:10 }
+    });
+    y3 = doc.lastAutoTable.finalY + 8;
+  }
+
+  // — Ranking de materias (mejor a peor)
+  if (y3 < h-60) {
+    doc.setFontSize(9.5); doc.setFont('helvetica','bold'); doc.setTextColor(26,35,126);
+    doc.text('RANKING DE MATERIAS POR % DE POSITIVOS', 14, y3);
+    doc.setTextColor(0,0,0);
+    y3 += 5;
+
+    const ranking = c.mats.map(mat=>{
+      const ms=s.matStats[mat]||{};
+      const mt=Object.values(ms).reduce((a,b)=>a+b,0);
+      const mp=pos.reduce((a,g)=>a+(ms[g]||0),0);
+      return { mat, p:mt?pct(mp,mt):0, mt };
+    }).sort((a,b)=>b.p-a.p);
+
+    const headRank=[['Posición','Materia','Total alumnos','% Positivos','Valoración']];
+    const bodyRank=ranking.map((r,i)=>[
+      String(i+1)+'º', r.mat, String(r.mt), r.p+'%', semaforo(r.p)
+    ]);
+    doc.autoTable({
+      head:headRank, body:bodyRank, startY:y3,
+      headStyles:{ fillColor:[26,35,126], textColor:255, fontStyle:'bold', fontSize:8 },
+      bodyStyles:{ fontSize:8.5 },
+      columnStyles:{ 0:{cellWidth:18,halign:'center'}, 1:{halign:'left',fontStyle:'bold'}, 2:{cellWidth:28,halign:'center'}, 3:{cellWidth:24,halign:'center',fontStyle:'bold'} },
+      alternateRowStyles:{ fillColor:[240,242,249] },
+      didParseCell: d=>{
+        if(d.section==='body'&&d.column.index===3){
+          const p=parseInt(d.cell.raw);
+          if(!isNaN(p)) d.cell.styles.textColor=p>=80?[46,125,50]:[198,40,40];
+        }
+        if(d.section==='body'&&d.column.index===4){
+          const v=d.cell.raw;
+          if(v==='EXCELENTE'||v==='BUENO') d.cell.styles.textColor=[46,125,50];
+          else if(v==='MEJORABLE') d.cell.styles.textColor=[245,127,23];
+          else d.cell.styles.textColor=[198,40,40];
+          d.cell.styles.fontStyle='bold';
+        }
+      },
+      margin:{ left:10, right:10 }
+    });
+    y3 = doc.lastAutoTable.finalY + 8;
+  }
+
+  // — Diligencia / Firma
+  const dY = Math.max(y3, h-50);
+  doc.setFillColor(245,247,252); doc.rect(10,dY,w-20,40,'F');
+  doc.setDrawColor(26,35,126); doc.rect(10,dY,w-20,40,'S');
+  doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(26,35,126);
+  doc.text('DILIGENCIA', w/2, dY+7, {align:'center'});
+  doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+  doc.text(`En Santa Fe, a ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`, w/2, dY+14, {align:'center'});
+
+  const col1=w/4, col2=w/2, col3=3*w/4;
+  doc.text('VºBº El Director/a', col1, dY+22, {align:'center'});
+  doc.text('El/La Tutor/a', col2, dY+22, {align:'center'});
+  doc.text('Secretario/a', col3, dY+22, {align:'center'});
+
+  // Líneas de firma
+  [col1,col2,col3].forEach(x=>{
+    doc.setDrawColor(100,100,100);
+    doc.line(x-30, dY+36, x+30, dY+36);
+  });
+  doc.text('Víctor Manuel Unica Salas', col1, dY+39, {align:'center'});
+
+  doc.save(`Acta_${cfg.label.replace(/[\.\s]/g,'')}_T${TRIM}_${state.anyo.replace('/','_')}.pdf`);
+  toast('📄 Acta completa generada — 3 páginas');
 }
-
 function generateInformeEjecutivo() {
   const data = getData();
   if (!Object.keys(data).length) return toast('Sin datos en este trimestre', true);
@@ -2176,42 +2384,170 @@ function generateInformeEjecutivo() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF('p','mm','a4');
   const w = doc.internal.pageSize.getWidth();
+  const TRIM = state.trimestre;
 
-  // Cover
+  // ── Portada ──────────────────────────────────────────────────
   doc.setFillColor(26,35,126);
-  doc.rect(0,0,w,60,'F');
+  doc.rect(0,0,w,65,'F');
   doc.setTextColor(255,255,255);
-  doc.setFontSize(18); doc.setFont('helvetica','bold');
-  doc.text('CEIP CAPITULACIONES DE SANTA FE', w/2, 25, {align:'center'});
+  doc.setFontSize(16); doc.setFont('helvetica','bold');
+  doc.text('CEIP CAPITULACIONES DE SANTA FE', w/2, 22, {align:'center'});
   doc.setFontSize(13);
-  doc.text('INFORME EJECUTIVO DE EVALUACIÓN', w/2, 36, {align:'center'});
-  doc.setFontSize(10);
-  doc.text(`${TRIM_NAMES[state.trimestre]} · Curso ${state.anyo}`, w/2, 46, {align:'center'});
-
+  doc.text('INFORME EJECUTIVO DE EVALUACIÓN', w/2, 34, {align:'center'});
+  doc.setFontSize(11); doc.setFont('helvetica','normal');
+  doc.text(TRIM_NAMES[TRIM] + ' — Curso ' + state.anyo, w/2, 44, {align:'center'});
+  doc.text('CEIP Capitulaciones de Santa Fe (Santa Fe, Granada)', w/2, 53, {align:'center'});
   doc.setTextColor(0,0,0);
-  let y = 70;
 
-  // Summary table
-  const head = [['Curso','Alumnos','% Positivos','% Negativos','Calificaciones']];
-  const body = Object.entries(data).map(([id, c]) => {
+  // ── 1. Tabla resumen global ───────────────────────────────────
+  doc.setFontSize(12); doc.setFont('helvetica','bold');
+  doc.text('1. Resumen global del centro', 14, 76);
+
+  const allCursos = Object.entries(data);
+  const headRes = [['Curso','Alumnos','Calific.','% Positivos','% Negativos','Nota mayoritaria']];
+  const bodyRes = allCursos.map(([id, c]) => {
     const cfg = CURSOS_CONFIG[id] || {label:id};
     const s = c.stats;
+    const topGrade = Object.entries(s.counts||{}).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—';
     return [
       cfg.label,
       String(c.alumnos?.length||0),
+      String(s.total||0),
       s.total ? Math.round(s.pos/s.total*100)+'%' : '—',
       s.total ? Math.round(s.neg/s.total*100)+'%' : '—',
-      String(s.total||0)
+      topGrade
     ];
   });
 
+  // Totales
+  const totAlumnos = allCursos.reduce((a,[,c])=>a+(c.alumnos?.length||0),0);
+  const totCalif   = allCursos.reduce((a,[,c])=>a+(c.stats?.total||0),0);
+  const totPos     = allCursos.reduce((a,[,c])=>a+(c.stats?.pos||0),0);
+  const totNeg     = allCursos.reduce((a,[,c])=>a+(c.stats?.neg||0),0);
+  bodyRes.push(['TOTAL CENTRO', String(totAlumnos), String(totCalif),
+    totCalif?Math.round(totPos/totCalif*100)+'%':'—',
+    totCalif?Math.round(totNeg/totCalif*100)+'%':'—', '']);
+
   doc.autoTable({
-    head, body, startY: y,
-    headStyles: { fillColor:[26,35,126], textColor:255, fontStyle:'bold' },
+    head: headRes, body: bodyRes, startY: 80,
+    headStyles: { fillColor:[26,35,126], textColor:255, fontStyle:'bold', fontSize:9 },
+    bodyStyles: { fontSize:9 },
     alternateRowStyles: { fillColor:[240,242,249] },
+    didParseCell: d => {
+      if (d.section==='body' && d.row.index===bodyRes.length-1) {
+        d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[230,230,255];
+      }
+    }
   });
 
-  doc.save(`Informe_Ejecutivo_T${state.trimestre}_${state.anyo.replace('/','_')}.pdf`);
+  // ── 2. Detalle por curso (tabla por materia) ──────────────────
+  doc.addPage();
+  doc.setFontSize(12); doc.setFont('helvetica','bold');
+  doc.text('2. Resultados por curso y materia', 14, 20);
+
+  let startY = 26;
+  allCursos.forEach(([id, c]) => {
+    const cfg = CURSOS_CONFIG[id] || {label:id};
+    const s = c.stats;
+    const grades = gradeList(c.tipo);
+
+    // Subtítulo curso
+    if (startY > 240) { doc.addPage(); startY = 20; }
+    doc.setFontSize(10); doc.setFont('helvetica','bold');
+    doc.setFillColor(240,242,249); doc.rect(14, startY-4, w-28, 8,'F');
+    doc.setTextColor(26,35,126);
+    doc.text(`${cfg.label} — ${c.alumnos?.length||0} alumnos — ${s.total?Math.round(s.pos/s.total*100):0}% positivos`, 16, startY+1);
+    doc.setTextColor(0,0,0);
+    startY += 6;
+
+    const headMat = [['Materia', ...grades, '% Pos']];
+    const bodyMat = c.mats.map(mat => {
+      const ms = s.matStats?.[mat]||{};
+      const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
+      const matPos   = grades.filter(g=>s.posGrades?.includes(g)).reduce((a,g)=>a+(ms[g]||0),0);
+      const pct = matTotal ? Math.round(matPos/matTotal*100)+'%' : '—';
+      return [mat, ...grades.map(g=>String(ms[g]||0)), pct];
+    });
+
+    doc.autoTable({
+      head:headMat, body:bodyMat, startY,
+      headStyles:{ fillColor:[21,101,192], textColor:255, fontSize:8, fontStyle:'bold', halign:'center' },
+      bodyStyles:{ fontSize:8, halign:'center' },
+      columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+      alternateRowStyles:{ fillColor:[248,249,252] },
+      margin:{ left:14, right:14 },
+      didParseCell: d => {
+        if (d.section==='body' && d.column.index===headMat[0].length-1) {
+          const pct = parseInt(d.cell.raw);
+          if (!isNaN(pct)) d.cell.styles.textColor = pct>=80?[46,125,50]:[198,40,40];
+          d.cell.styles.fontStyle='bold';
+        }
+      }
+    });
+    startY = doc.lastAutoTable.finalY + 8;
+  });
+
+  // ── 3. Distribución de calificaciones ─────────────────────────
+  doc.addPage();
+  doc.setFontSize(12); doc.setFont('helvetica','bold');
+  doc.text('3. Distribución global de calificaciones', 14, 20);
+
+  // Acumulado por calificación en todo el centro
+  const globalCounts = {};
+  allCursos.forEach(([,c]) => {
+    Object.entries(c.stats?.counts||{}).forEach(([g,v]) => {
+      globalCounts[g] = (globalCounts[g]||0) + v;
+    });
+  });
+  const gradeColors = {SB:[21,101,192],NT:[46,125,50],BI:[245,127,23],
+    SU:[230,81,0],IN:[198,40,40],EXC:[21,101,192],BUE:[46,125,50],ADE:[245,127,23],NAD:[198,40,40]};
+  const headGlob = [['Calificación','Total','% del centro']];
+  const bodyGlob = Object.entries(globalCounts).map(([g,v]) => [
+    g, String(v), totCalif ? Math.round(v/totCalif*100)+'%' : '—'
+  ]);
+  bodyGlob.push(['TOTAL', String(totCalif), '100%']);
+
+  doc.autoTable({
+    head:headGlob, body:bodyGlob, startY:26,
+    headStyles:{ fillColor:[26,35,126], textColor:255, fontStyle:'bold' },
+    bodyStyles:{ fontSize:9 },
+    alternateRowStyles:{ fillColor:[240,242,249] },
+    didParseCell: d => {
+      if (d.section==='body' && d.column.index===0 && d.row.index<bodyGlob.length-1) {
+        const g = d.cell.raw;
+        if (gradeColors[g]) d.cell.styles.textColor = gradeColors[g];
+        d.cell.styles.fontStyle='bold';
+      }
+      if (d.section==='body' && d.row.index===bodyGlob.length-1)
+        d.cell.styles.fontStyle='bold';
+    }
+  });
+
+  // ── 4. Cursos con más atención requerida ──────────────────────
+  const yAt = doc.lastAutoTable.finalY + 12;
+  doc.setFontSize(11); doc.setFont('helvetica','bold');
+  doc.text('4. Cursos con mayor porcentaje de negativos', 14, yAt);
+  const sorted = allCursos
+    .filter(([,c])=>c.stats?.total>0)
+    .sort((a,b)=>{ const pA=b[1].stats.neg/b[1].stats.total; const pB=a[1].stats.neg/a[1].stats.total; return pA-pB; });
+  const headAt = [['Curso','% Negativos','Alumnos','Atencion']];
+  const bodyAt = sorted.map(([id,c]) => {
+    const pct = Math.round(c.stats.neg/c.stats.total*100);
+    return [
+      (CURSOS_CONFIG[id]||{label:id}).label,
+      pct+'%',
+      String(c.alumnos?.length||0),
+      pct>=20 ? '🔴 Alta' : pct>=10 ? '🟡 Media' : '🟢 Baja'
+    ];
+  });
+  doc.autoTable({
+    head:headAt, body:bodyAt, startY:yAt+4,
+    headStyles:{ fillColor:[198,40,40], textColor:255, fontStyle:'bold', fontSize:9 },
+    bodyStyles:{ fontSize:9 },
+    alternateRowStyles:{ fillColor:[255,235,238] },
+  });
+
+  doc.save(`Informe_Ejecutivo_T${TRIM}_${state.anyo.replace('/','_')}.pdf`);
   toast('📊 Informe ejecutivo generado');
 }
 
@@ -2269,63 +2605,123 @@ function renderComparativa() {
 }
 
 function renderCompGrupo(id, t1, t2, t3, grades, cfg) {
-  const COLORS = {SB:'#1565C0',NT:'#2E7D32',BI:'#F57F17',SU:'#E65100',IN:'#C62828',
-    EXC:'#1565C0',BUE:'#2E7D32',ADE:'#F57F17',NAD:'#C62828'};
+  const TRIM_BG  = ['#E8EAF6','#E8F5E9','#FFEBEE'];
+  const TRIM_HDR = ['#1A237E','#1B5E20','#B71C1C'];
   const content = document.getElementById('comp-content');
 
-  const chartId = 'comp-chart-grupo';
+  const trims = [t1,t2,t3];
+  const labels = ['1T','2T','3T'].filter((_,i)=>trims[i]);
+  const data   = trims.filter(Boolean);
+
+  const lineId = 'comp-line-grupo';
+  const pieIds = labels.map(l => 'comp-pie-'+l);
+
+  let piesHtml = labels.map((l,i) => `
+    <div class="chart-card" style="flex:1;min-width:160px;max-width:260px">
+      <div class="card-title" style="background:${TRIM_HDR[i]};color:#fff;margin:-16px -16px 12px;padding:8px 12px;border-radius:var(--r) var(--r) 0 0">
+        🍩 ${l}
+      </div>
+      <div class="chart-wrap" style="height:160px"><canvas id="${pieIds[i]}"></canvas></div>
+      <div id="pie-legend-${l}" style="font-size:11px;margin-top:6px;line-height:1.7;text-align:center"></div>
+    </div>`).join('');
+
   content.innerHTML = `
     <div class="card">
-      <div class="card-title">📈 Evolución de resultados — ${cfg.label}</div>
-      <div class="chart-wrap" style="height:280px"><canvas id="${chartId}"></canvas></div>
+      <div class="card-title">📈 Evolución % positivos/negativos — ${cfg.label}</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="${lineId}"></canvas></div>
     </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">${piesHtml}</div>
     <div class="card">
-      <div class="card-title">📋 Tabla comparativa</div>
+      <div class="card-title">📋 Tabla comparativa de calificaciones</div>
       <div class="table-wrap" id="comp-table"></div>
     </div>`;
 
-  // Chart
-  if (_charts[chartId]) _charts[chartId].destroy();
-  const trims = [t1,t2,t3];
-  const labels = ['1T','2T','3T'].filter((_,i)=>trims[i]);
-  const data = trims.filter(Boolean);
+  [lineId,...pieIds].forEach(cid => { if (_charts[cid]) { _charts[cid].destroy(); delete _charts[cid]; } });
 
   setTimeout(() => {
-    const el = document.getElementById(chartId);
-    if (!el) return;
-    _charts[chartId] = new Chart(el, {
-      type:'line',
-      data: {
-        labels,
-        datasets: [{
-          label:'% Positivos',
-          data: data.map(t => t.stats.total ? Math.round(t.stats.pos/t.stats.total*100) : 0),
-          borderColor:'#2E7D32',backgroundColor:'rgba(46,125,50,.15)',
-          fill:true,tension:.4,pointRadius:6,pointBackgroundColor:'#2E7D32'
-        },{
-          label:'% Negativos',
-          data: data.map(t => t.stats.total ? Math.round(t.stats.neg/t.stats.total*100) : 0),
-          borderColor:'#C62828',backgroundColor:'rgba(198,40,40,.1)',
-          fill:true,tension:.4,pointRadius:6,pointBackgroundColor:'#C62828'
-        }]
-      },
-      options:{responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{position:'bottom'}},
-        scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}
+    // Gráfica de línea
+    const lineEl = document.getElementById(lineId);
+    if (lineEl) {
+      _charts[lineId] = new Chart(lineEl, {
+        type:'line',
+        data: {
+          labels,
+          datasets: [{
+            label:'% Positivos',
+            data: data.map(t => t.stats.total ? Math.round(t.stats.pos/t.stats.total*100) : 0),
+            borderColor:'#2E7D32',backgroundColor:'rgba(46,125,50,.15)',
+            fill:true,tension:.4,pointRadius:7,pointBackgroundColor:'#2E7D32'
+          },{
+            label:'% Negativos',
+            data: data.map(t => t.stats.total ? Math.round(t.stats.neg/t.stats.total*100) : 0),
+            borderColor:'#C62828',backgroundColor:'rgba(198,40,40,.1)',
+            fill:true,tension:.4,pointRadius:7,pointBackgroundColor:'#C62828'
+          }]
+        },
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{
+            legend:{position:'bottom'},
+            tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y}%`}}
+          },
+          scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}
+        }
+      });
+    }
+
+    // Quesitos por trimestre
+    data.forEach((t, i) => {
+      const el = document.getElementById(pieIds[i]);
+      if (!el) return;
+      const pos = t.stats.total ? Math.round(t.stats.pos/t.stats.total*100) : 0;
+      const neg = t.stats.total ? Math.round(t.stats.neg/t.stats.total*100) : 0;
+      const neu = Math.max(0, 100 - pos - neg);
+      const hasNeu = neu > 0;
+      const pieData   = hasNeu ? [pos, neu, neg] : [pos, neg];
+      const pieLabels = hasNeu
+        ? [`✅ Aprobados ${pos}%`, `🟡 Suficiente/Bien ${neu}%`, `❌ Suspensos ${neg}%`]
+        : [`✅ Aprobados ${pos}%`, `❌ Suspensos ${neg}%`];
+      const pieColors = hasNeu ? ['#2E7D32','#F57F17','#C62828'] : ['#2E7D32','#C62828'];
+
+      _charts[pieIds[i]] = new Chart(el, {
+        type:'doughnut',
+        data:{ labels:pieLabels, datasets:[{ data:pieData, backgroundColor:pieColors, borderWidth:2, borderColor:'#fff' }] },
+        options:{
+          responsive:true,maintainAspectRatio:false,cutout:'55%',
+          plugins:{
+            legend:{ display:false },
+            tooltip:{ callbacks:{ label:ctx => ctx.label } }
+          }
+        }
+      });
+
+      const legEl = document.getElementById('pie-legend-'+labels[i]);
+      if (legEl) {
+        legEl.innerHTML = pieLabels.map((l,j) =>
+          `<span style="color:${pieColors[j]};font-weight:700">${l}</span>`
+        ).join('<br>');
+      }
     });
 
-    // Table
+    // Tabla comparativa
     let html = `<table class="evol-table"><thead><tr><th>Calificación</th>` +
-      labels.map(l=>`<th>${l}</th>`).join('') + `<th>Tendencia</th></tr></thead><tbody>`;
+      labels.map((l,i)=>`<th style="background:${TRIM_HDR[i]};color:#fff">${l}</th>`).join('') +
+      `<th>Tendencia</th></tr></thead><tbody>`;
     grades.forEach(g => {
       html += `<tr><td><span class="pill g-${g}">${g}</span></td>`;
       const vals = data.map(t => t.stats.counts[g]||0);
-      vals.forEach(v => html += `<td>${v}</td>`);
+      vals.forEach((v,i) => html += `<td style="background:${TRIM_BG[i]}">${v}</td>`);
       const trend = vals.length>=2 ? (vals[vals.length-1]-vals[0]) : 0;
       const trendCls = trend>0?'mejora':trend<0?'empeora':'igual';
       html += `<td class="${trendCls}">${trend>0?'↑'+trend:trend<0?'↓'+Math.abs(trend):'→'}</td></tr>`;
     });
-    html += `</tbody></table>`;
+    // Fila resumen % positivos
+    html += `<tr style="font-weight:700;border-top:2px solid #ccc"><td>% Positivos</td>`;
+    data.forEach((t,i) => {
+      const pct = t.stats.total ? Math.round(t.stats.pos/t.stats.total*100) : 0;
+      html += `<td style="background:${TRIM_BG[i]};color:${pct>=80?'var(--verdeM)':'var(--rojo)'}">${pct}%</td>`;
+    });
+    html += `<td></td></tr></tbody></table>`;
     document.getElementById('comp-table').innerHTML = html;
   }, 50);
 }
@@ -2336,18 +2732,41 @@ function renderCompMateria(id, t1, t2, t3, grades, mats, cfg) {
   const trimLabels = ['1T','2T','3T'].filter((_,i)=>trims[i]);
   const data = trims.filter(Boolean);
 
+  // Colores distintivos por trimestre
+  const TRIM_COLORS = {
+    '1T': { bg:'#1A237E', light:'#E8EAF6', text:'#1A237E' }, // azul oscuro
+    '2T': { bg:'#1B5E20', light:'#E8F5E9', text:'#1B5E20' }, // verde oscuro
+    '3T': { bg:'#B71C1C', light:'#FFEBEE', text:'#B71C1C' }, // rojo oscuro
+  };
+
+  // Cabecera: una celda por trimestre que agrupa las columnas de calificaciones
+  let headerRow1 = `<tr><th rowspan="2" style="vertical-align:middle">Materia</th>`;
+  let headerRow2 = `<tr>`;
+  data.forEach((t, i) => {
+    const lbl = trimLabels[i];
+    const col = TRIM_COLORS[lbl] || TRIM_COLORS['1T'];
+    headerRow1 += `<th colspan="${grades.length}" style="background:${col.bg};color:#fff;text-align:center;font-weight:800;letter-spacing:.5px;border-bottom:2px solid #fff">${lbl}</th>`;
+    grades.forEach(g => {
+      headerRow2 += `<th style="background:${col.light};color:${col.text};font-size:10px;font-weight:700">${g}</th>`;
+    });
+  });
+  headerRow1 += `<th rowspan="2" style="vertical-align:middle">% Pos<br>último T</th></tr>`;
+  headerRow2 += `</tr>`;
+
   let html = `<div class="card"><div class="card-title">📊 Evolución por materia — ${cfg.label}</div>
     <div class="table-wrap"><table class="evol-table">
-    <thead><tr><th>Materia</th>` +
-    data.map((t,i) => grades.map(g=>`<th>${trimLabels[i]}<br><small>${g}</small></th>`).join('')).join('') +
-    `<th>% Pos T${data.length}</th></tr></thead><tbody>`;
+    <thead>${headerRow1}${headerRow2}</thead><tbody>`;
 
   mats.forEach(mat => {
     html += `<tr><td><strong>${mat}</strong></td>`;
-    data.forEach(t => {
+    data.forEach((t, i) => {
+      const lbl = trimLabels[i];
+      const col = TRIM_COLORS[lbl] || TRIM_COLORS['1T'];
       grades.forEach(g => {
         const v = t.stats.matStats[mat]?.[g]||0;
-        html += v ? `<td><span class="pill g-${g}">${v}</span></td>` : '<td>—</td>';
+        html += v
+          ? `<td style="background:${col.light}""><span class="pill g-${g}">${v}</span></td>`
+          : `<td style="background:${col.light}">—</td>`;
       });
     });
     const lastT = data[data.length-1];
@@ -2409,131 +2828,436 @@ function generateClaudePrompt() {
     return;
   }
 
-  let prompt = `Eres una experta en análisis educativo. Analiza los siguientes datos de evaluación del CEIP Capitulaciones de Santa Fe (Santa Fe, Granada) y genera un informe profesional en español.
+  const trimName = TRIM_NAMES[trim];
+  const anyo = state.anyo;
 
-**Centro:** CEIP Capitulaciones de Santa Fe
-**Trimestre:** ${TRIM_NAMES[trim]}
-**Año académico:** ${state.anyo}
+  // ── Helpers ──────────────────────────────────────────────────
+  function pct(n,d){ return d ? Math.round(n/d*100) : 0; }
+  function topGrade(counts){ return Object.entries(counts||{}).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—'; }
+  function semaforo(p){ return p>=85?'EXCELENTE':p>=75?'BUENO':p>=60?'MEJORABLE':p>=50?'PREOCUPANTE':'CRÍTICO'; }
+  function tendenciaMat(mat, posGrades, t){
+    const ms=t.stats.matStats[mat]||{};
+    const tot=Object.values(ms).reduce((a,b)=>a+b,0);
+    const pos=posGrades.reduce((a,g)=>a+(ms[g]||0),0);
+    return tot?pct(pos,tot):null;
+  }
+  function listaAlumnos(alumnos, mats, negGrades){
+    return alumnos.map((a,i)=>{
+      const malas=mats.filter(m=>negGrades.includes(a.notas[m]));
+      return malas.length ? `Alumno ${i+1}: suspenso en ${malas.join(', ')}` : null;
+    }).filter(Boolean);
+  }
+
+  // ── Cabecera común ───────────────────────────────────────────
+  let prompt = `Eres una inspectora de educación experta en análisis de resultados académicos de centros de Educación Infantil y Primaria. Tu misión es generar un informe riguroso, detallado y orientado a la mejora continua del CEIP Capitulaciones de Santa Fe (Santa Fe, Granada, Andalucía). Redacta siempre en español formal, con párrafos completos, tablas resumen donde sean útiles y propuestas de mejora concretas, medibles y atribuidas a responsables. No uses frases vacías. Cada afirmación debe basarse en los datos proporcionados.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+METADATOS DEL INFORME
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Centro: CEIP Capitulaciones de Santa Fe
+Localidad: Santa Fe (Granada) — Andalucía
+Trimestre analizado: ${trimName}
+Año académico: ${anyo}
+Fecha de generación: ${new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'})}
 
 `;
 
-  if (tipo === 'ejecutivo' || tipo === 'mejoras') {
-    prompt += `## DATOS COMPLETOS DEL CENTRO
+  // ══════════════════════════════════════════════════════════════
+  // TIPO: EJECUTIVO
+  // ══════════════════════════════════════════════════════════════
+  if (tipo === 'ejecutivo') {
+    const etapas = {infantil:[], primaria:[], tea:[]};
+    Object.entries(data).forEach(([id,c])=>{
+      if (etapas[c.tipo]) etapas[c.tipo].push([id,c]);
+    });
+
+    // Totales globales
+    const allC = Object.values(data);
+    const totAlumnos = allC.reduce((a,c)=>a+(c.alumnos?.length||0),0);
+    const totCalif   = allC.reduce((a,c)=>a+(c.stats?.total||0),0);
+    const totPos     = allC.reduce((a,c)=>a+(c.stats?.pos||0),0);
+    const totNeg     = allC.reduce((a,c)=>a+(c.stats?.neg||0),0);
+    const pctPos = pct(totPos,totCalif);
+    const pctNeg = pct(totNeg,totCalif);
+
+    prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATOS CUANTITATIVOS — RESUMEN GLOBAL DEL CENTRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total alumnado evaluado: ${totAlumnos}
+Total calificaciones registradas: ${totCalif}
+% Positivos (centro): ${pctPos}%
+% Negativos (centro): ${pctNeg}%
+Valoración global: ${semaforo(pctPos)}
 
 `;
-    Object.entries(data).forEach(([id, c]) => {
-      const cfg = CURSOS_CONFIG[id] || {label:id};
-      const s = c.stats;
-      prompt += `### ${cfg.label}
-`;
-      prompt += `- Alumnos: ${c.alumnos?.length||0}
-`;
-      prompt += `- % Positivos: ${s.total?Math.round(s.pos/s.total*100):0}%
-`;
-      prompt += `- % Negativos: ${s.total?Math.round(s.neg/s.total*100):0}%
-`;
-      prompt += `- Distribución: ${Object.entries(s.counts).map(([g,v])=>g+':'+v).join(', ')}
-`;
-      prompt += `- Por materia:
-`;
-      c.mats.forEach(mat => {
-        const ms = s.matStats[mat]||{};
-        prompt += `  · ${mat}: ${Object.entries(ms).map(([g,v])=>g+'='+v).join(', ')}
-`;
+
+    prompt += `DESGLOSE POR CURSO:\n`;
+    prompt += `Curso | Alumnos | Calific. | % Pos | % Neg | Nota top | Valoración\n`;
+    prompt += `------|---------|----------|-------|-------|----------|----------\n`;
+    Object.entries(data).forEach(([id,c])=>{
+      const cfg=CURSOS_CONFIG[id]||{label:id};
+      const s=c.stats;
+      const p=pct(s.pos,s.total), n=pct(s.neg,s.total);
+      prompt += `${cfg.label} | ${c.alumnos?.length||0} | ${s.total||0} | ${p}% | ${n}% | ${topGrade(s.counts)} | ${semaforo(p)}\n`;
+    });
+
+    prompt += `\n`;
+
+    // Por etapa
+    ['infantil','primaria','tea'].forEach(etapa => {
+      const lista = etapas[etapa];
+      if (!lista.length) return;
+      const nombres = {infantil:'Educación Infantil', primaria:'Educación Primaria', tea:'Aula TEA'};
+      prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nETAPA: ${nombres[etapa]}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      lista.forEach(([id,c])=>{
+        const cfg=CURSOS_CONFIG[id]||{label:id};
+        const s=c.stats;
+        const grades=gradeList(c.tipo);
+        const neg=c.tipo==='primaria'?['IN']:c.tipo==='infantil'?['NAD']:[];
+        const pos=c.tipo==='primaria'?['SB','NT','BI','SU']:c.tipo==='infantil'?['EXC','BUE','ADE']:['BUE','ADE'];
+        prompt += `\n## ${cfg.label} (${c.alumnos?.length||0} alumnos)\n`;
+        prompt += `Distribución: ${grades.map(g=>`${g}=${s.counts[g]||0}`).join(' | ')}\n`;
+        prompt += `% Positivos: ${pct(s.pos,s.total)}%  |  % Negativos: ${pct(s.neg,s.total)}%\n`;
+        prompt += `Materias:\n`;
+        c.mats.forEach(mat=>{
+          const ms=s.matStats[mat]||{};
+          const mt=Object.values(ms).reduce((a,b)=>a+b,0);
+          const mp=pos.reduce((a,g)=>a+(ms[g]||0),0);
+          const mn=neg.reduce((a,g)=>a+(ms[g]||0),0);
+          prompt += `  ${mat}: ${grades.map(g=>`${g}=${ms[g]||0}`).join(' ')} → ${mt?pct(mp,mt):0}% pos`;
+          if (mn>0) prompt += ` ⚠️ ${mn} suspenso/s`;
+          prompt += `\n`;
+        });
+        // Alumnos con negativos
+        const conNeg = listaAlumnos(c.alumnos, c.mats, neg);
+        if (conNeg.length) {
+          prompt += `Alumnado con calificaciones negativas:\n`;
+          conNeg.forEach(l=>prompt+=`  - ${l}\n`);
+        }
+      });
+    });
+
+    prompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES PARA EL INFORME
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera un INFORME EJECUTIVO DE CENTRO estructurado con estos apartados OBLIGATORIOS y extensos:
+
+1. INTRODUCCIÓN Y CONTEXTO
+   - Descripción del período evaluado y características del centro
+   - Metodología de análisis empleada
+
+2. RESULTADOS GLOBALES DEL CENTRO
+   - Análisis del dato global de positivos/negativos con interpretación pedagógica
+   - Comparación con referencias esperables para cada etapa
+   - Gráfica descriptiva en texto (tabla ASCII de distribución)
+
+3. ANÁLISIS POR ETAPA EDUCATIVA
+   Para cada etapa (Infantil / Primaria / TEA):
+   - Resumen cuantitativo con valoración cualitativa
+   - Fortalezas detectadas con ejemplos concretos de los datos
+   - Áreas de mejora identificadas con datos que las justifican
+
+4. ANÁLISIS POR CURSO (uno a uno, sin saltarse ninguno)
+   Para cada curso:
+   - Diagnóstico general del grupo
+   - Materia/s con mejores resultados y por qué son destacables
+   - Materia/s con peores resultados y factores que pueden explicarlo
+   - Perfil del alumnado en riesgo (sin identificar, solo en número y patrón)
+   - Propuestas de intervención específicas para ese curso
+
+5. ANÁLISIS POR MATERIA TRANSVERSAL (materias comunes a varios cursos)
+   - ¿En qué cursos se dan los mejores resultados en Matemáticas/LCL/ING?
+   - ¿Hay una materia sistemáticamente problemática en varios cursos?
+   - Hipótesis explicativas y propuestas de coordinación de ciclo
+
+6. FORTALEZAS DEL CENTRO
+   - Mínimo 5 fortalezas concretas basadas en datos
+
+7. ÁREAS DE MEJORA PRIORITARIAS
+   - Mínimo 5 áreas con justificación cuantitativa
+   - Ordenadas por urgencia (crítica / importante / a medio plazo)
+
+8. PLAN DE ACCIÓN PARA EL PRÓXIMO TRIMESTRE
+   - Tabla con: ACCIÓN | RESPONSABLE | PLAZO | INDICADOR DE ÉXITO
+   - Mínimo 8 acciones concretas y realistas
+
+9. CONCLUSIONES Y VALORACIÓN FINAL
+   - Síntesis ejecutiva en 3-4 párrafos
+   - Tendencia general del centro
+   - Mensaje motivador para el claustro basado en los datos positivos
+
+Extensión mínima: 1500 palabras. Usa negritas, tablas y listas para facilitar la lectura.`;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // TIPO: MEJORAS
+  // ══════════════════════════════════════════════════════════════
+  else if (tipo === 'mejoras') {
+    prompt += `DATOS COMPLETOS DEL TRIMESTRE ${trimName}\n\n`;
+    Object.entries(data).forEach(([id,c])=>{
+      const cfg=CURSOS_CONFIG[id]||{label:id};
+      const s=c.stats;
+      const grades=gradeList(c.tipo);
+      const neg=c.tipo==='primaria'?['IN']:['NAD'];
+      prompt += `## ${cfg.label} — ${c.alumnos?.length||0} alumnos — ${pct(s.pos,s.total)}% positivos\n`;
+      c.mats.forEach(mat=>{
+        const ms=s.matStats[mat]||{};
+        const mt=Object.values(ms).reduce((a,b)=>a+b,0);
+        const mn=neg.reduce((a,g)=>a+(ms[g]||0),0);
+        if (mn>0) prompt+=`  ⚠️ ${mat}: ${mn} negativo/s de ${mt}\n`;
+      });
+      const conNeg=listaAlumnos(c.alumnos,c.mats,neg);
+      if(conNeg.length) conNeg.forEach(l=>prompt+=`  - ${l}\n`);
+      prompt+='\n';
+    });
+
+    prompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera un PLAN DE MEJORA DETALLADO con:
+
+1. DIAGNÓSTICO DE NECESIDADES
+   - Qué cursos y materias requieren intervención urgente (con datos)
+   - Patrón común entre los cursos con más dificultades
+
+2. PRIORIZACIÓN DE ACTUACIONES
+   Tabla: PRIORIDAD | CURSO/MATERIA | PROBLEMA | ACCIÓN | RESPONSABLE | PLAZO | RECURSOS
+   - URGENTE (este trimestre): mínimo 5 acciones
+   - PLANIFICADA (próximo trimestre): mínimo 5 acciones
+   - ESTRUCTURAL (a largo plazo): mínimo 3 acciones
+
+3. PROPUESTAS METODOLÓGICAS CONCRETAS
+   Por cada materia problemática:
+   - Estrategias de enseñanza alternativas
+   - Recursos didácticos recomendados
+   - Técnicas de evaluación formativa
+
+4. PLAN DE REFUERZO Y ENRIQUECIMIENTO
+   - Programa de refuerzo para alumnado con negativos
+   - Programa de enriquecimiento para alumnado con excelencia
+   - Agrupamientos flexibles recomendados
+
+5. COORDINACIÓN DE CICLO
+   - Acuerdos metodológicos propuestos por ciclo
+   - Materias que necesitan criterios comunes de evaluación
+
+6. SEGUIMIENTO Y EVALUACIÓN DEL PLAN
+   - Indicadores medibles para cada acción
+   - Calendario de revisión
+   - Responsable de seguimiento global
+
+Extensión mínima: 1200 palabras. Sé muy concreto y práctico.`;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // TIPO: COMPARATIVA TRIMESTRAL
+  // ══════════════════════════════════════════════════════════════
+  else if (tipo === 'comparativa') {
+    prompt += `EVOLUCIÓN TRIMESTRAL — DATOS COMPLETOS\n\n`;
+    const trimsData = [1,2,3].map(t=>({t, d:getData(t)})).filter(({d})=>Object.keys(d).length>0);
+
+    trimsData.forEach(({t,d})=>{
+      prompt += `### TRIMESTRE ${t}\n`;
+      Object.entries(d).forEach(([id,c])=>{
+        const cfg=CURSOS_CONFIG[id]||{label:id};
+        const s=c.stats;
+        const grades=gradeList(c.tipo);
+        prompt += `${cfg.label}: ${grades.map(g=>`${g}=${s.counts[g]||0}`).join(' ')} → ${pct(s.pos,s.total)}% pos / ${pct(s.neg,s.total)}% neg\n`;
+        c.mats.forEach(mat=>{
+          const ms=s.matStats[mat]||{};
+          const mt=Object.values(ms).reduce((a,b)=>a+b,0);
+          prompt += `  ${mat}: ${grades.map(g=>ms[g]?`${g}:${ms[g]}`:'').filter(Boolean).join(' ')}\n`;
+        });
       });
       prompt += '\n';
     });
+
+    prompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera un INFORME DE EVOLUCIÓN TRIMESTRAL con:
+
+1. TENDENCIAS GLOBALES DEL CENTRO
+   - Evolución del % positivos entre trimestres
+   - ¿Hay mejora, estancamiento o empeoramiento general?
+   - Qué etapa evoluciona mejor y cuál peor
+
+2. ANÁLISIS CURSO A CURSO
+   Para cada curso disponible:
+   - Tabla de evolución por calificación (T1→T2→T3)
+   - Materia con mayor mejora y materia con mayor retroceso
+   - Interpretación pedagógica de la tendencia
+
+3. MATERIAS CON EVOLUCIÓN DESTACABLE
+   - Top 3 materias con mayor mejora en el centro
+   - Top 3 materias con mayor empeoramiento
+   - Hipótesis explicativas para cada caso
+
+4. ALUMNADO EN SITUACIÓN DE RIESGO
+   - Cursos con más alumnado en riesgo de no promoción
+   - Patrón de negativos acumulados a lo largo de trimestres
+   - Propuesta de intervención urgente antes del cierre de curso
+
+5. PROYECCIÓN PARA EL CIERRE DE CURSO
+   - ¿Qué cursos están en buena trayectoria para terminar bien?
+   - ¿Cuáles necesitan un esfuerzo especial en el último tramo?
+   - Recomendaciones específicas para las semanas finales
+
+6. CONCLUSIONES Y RECOMENDACIONES
+   - Valoración global de la evolución del centro
+   - Decisiones de coordinación sugeridas para el claustro
+
+Extensión mínima: 1000 palabras.`;
   }
 
-  if (tipo === 'ejecutivo') {
-    prompt += `
-## TAREA
-Genera un informe ejecutivo completo con:
-1. Resumen global del centro
-2. Análisis por etapa (Infantil, Primaria, TEA)
-3. Fortalezas detectadas
-4. Áreas de mejora prioritarias
-5. Propuestas concretas para el siguiente trimestre
-6. Tabla resumen con todos los cursos`;
-  } else if (tipo === 'mejoras') {
-    prompt += `
-## TAREA
-Genera un plan detallado de propuestas de mejora con:
-1. Priorización de actuaciones (urgente / planificada / a largo plazo)
-2. Acciones concretas por curso
-3. Responsables sugeridos
-4. Indicadores de seguimiento`;
-  } else if (tipo === 'comparativa') {
-    const trims = [1,2,3];
-    prompt += `## EVOLUCIÓN TRIMESTRAL
-
-`;
-    trims.forEach(t => {
-      const d = getData(t);
-      if (!Object.keys(d).length) return;
-      prompt += `### Trimestre ${t}
-`;
-      Object.entries(d).forEach(([id,c]) => {
-        const s = c.stats;
-        prompt += `${CURSOS_CONFIG[id]?.label||id}: ${s.total?Math.round(s.pos/s.total*100):0}% positivos
-`;
-      });
-    });
-    prompt += `
-## TAREA
-Analiza la evolución trimestral y genera:
-1. Tendencias positivas y negativas por curso
-2. Alumnado en riesgo de repetición
-3. Materias con mejora/empeoramiento sostenido
-4. Recomendaciones para el cierre de curso`;
-  } else if (tipo === 'tea') {
+  // ══════════════════════════════════════════════════════════════
+  // TIPO: TEA
+  // ══════════════════════════════════════════════════════════════
+  else if (tipo === 'tea') {
     const tea = data['tea'];
-    if (tea) {
-      prompt += `## DATOS AULA TEA
+    if (!tea) { toast('Sin datos del Aula TEA', true); return; }
+    const s = tea.stats;
+    const grades = gradeList(tea.tipo);
 
-`;
-      tea.alumnos.forEach((a,i) => {
-        prompt += `Alumno ${i+1}: ${Object.entries(a.notas).map(([m,v])=>m+':'+v).join(', ')}
-`;
-      });
-      prompt += `
-## TAREA
-Genera un informe del Aula TEA con:
-1. Valoración individual de cada alumno
-2. Logros destacados
-3. Ámbitos a reforzar
-4. Propuestas de adaptación curricular individualizadas`;
-    }
-  } else if (tipo === 'curso' && cursoSel) {
-    const c = data[cursoSel];
-    if (c) {
-      prompt += `## DATOS DE ${CURSOS_CONFIG[cursoSel]?.label||cursoSel}
+    prompt += `DATOS DEL AULA TEA — ${trimName}\nTotal alumnos: ${tea.alumnos.length}\n\n`;
+    prompt += `Distribución global: ${grades.map(g=>`${g}=${s.counts[g]||0}`).join(' | ')}\n\n`;
+    prompt += `DATOS INDIVIDUALES (anonimizados):\n`;
+    tea.alumnos.forEach((a,i)=>{
+      const notas = tea.mats.map(m=>`${m}:${a.notas[m]||'NC'}`).join(' | ');
+      prompt += `Alumno ${i+1}: ${notas}\n`;
+    });
+    prompt += `\nResultados por área:\n`;
+    tea.mats.forEach(mat=>{
+      const ms=s.matStats[mat]||{};
+      prompt += `  ${mat}: ${grades.map(g=>`${g}=${ms[g]||0}`).join(' ')}\n`;
+    });
 
-`;
-      c.alumnos.forEach((a,i) => {
-        prompt += `Alumno ${i+1}: ${Object.entries(a.notas).map(([m,v])=>v?m+':'+v:'').filter(Boolean).join(', ')}
-`;
-      });
-      prompt += `
-## TAREA
-Genera un análisis completo del curso con:
-1. Diagnóstico por materias
-2. Perfil del alumnado con dificultades
-3. Propuestas de mejora específicas
-4. Actividades de refuerzo y enriquecimiento`;
-    }
+    prompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera un INFORME DEL AULA TEA con:
+
+1. INTRODUCCIÓN AL CONTEXTO TEA
+   - Características generales del aula y del alumnado atendido
+   - Marco normativo de referencia (Instrucciones de la Junta de Andalucía)
+
+2. VALORACIÓN INDIVIDUAL DE CADA ALUMNO
+   Para cada alumno (numerado, sin nombre):
+   - Perfil de resultados área a área
+   - Logros más significativos del trimestre
+   - Aspectos que requieren mayor apoyo
+   - Grado de consecución de objetivos de la ACI
+
+3. ANÁLISIS GRUPAL
+   - Áreas con mejores resultados del grupo
+   - Áreas con mayores dificultades del grupo
+   - Patrones comunes y diferencias individuales relevantes
+
+4. ADAPTACIONES CURRICULARES INDIVIDUALIZADAS
+   Para cada alumno: propuestas concretas de adaptación para el siguiente trimestre
+   (metodología, materiales, tiempos, apoyos específicos)
+
+5. COORDINACIÓN CON FAMILIAS Y EQUIPO DOCENTE
+   - Aspectos clave a comunicar a las familias
+   - Coordinación necesaria con tutores y especialistas
+   - Reuniones o seguimientos recomendados
+
+6. OBJETIVOS PARA EL PRÓXIMO TRIMESTRE
+   - Objetivos prioritarios por alumno
+   - Estrategias de intervención específicas
+   - Criterios de evaluación adaptados
+
+Extensión mínima: 800 palabras. Muestra sensibilidad y rigor profesional.`;
   }
 
-  prompt += `
+  // ══════════════════════════════════════════════════════════════
+  // TIPO: CURSO CONCRETO
+  // ══════════════════════════════════════════════════════════════
+  else if (tipo === 'curso' && cursoSel) {
+    const c = data[cursoSel];
+    if (!c) { toast('Sin datos para ese curso', true); return; }
+    const cfg = CURSOS_CONFIG[cursoSel]||{label:cursoSel};
+    const s = c.stats;
+    const grades = gradeList(c.tipo);
+    const neg = c.tipo==='primaria'?['IN']:c.tipo==='infantil'?['NAD']:[];
+    const pos = c.tipo==='primaria'?['SB','NT','BI','SU']:c.tipo==='infantil'?['EXC','BUE','ADE']:['BUE','ADE'];
 
----
-*Datos generados por la app de gestión de evaluaciones del CEIP Capitulaciones de Santa Fe*`;
+    prompt += `DATOS COMPLETOS — ${cfg.label} — ${trimName}\n`;
+    prompt += `Tipo: ${c.tipo} | Alumnos: ${c.alumnos.length} | Materias: ${c.mats.join(', ')}\n\n`;
+    prompt += `DISTRIBUCIÓN GLOBAL:\n${grades.map(g=>`  ${g}: ${s.counts[g]||0} alumnos`).join('\n')}\n`;
+    prompt += `% Positivos: ${pct(s.pos,s.total)}%  |  % Negativos: ${pct(s.neg,s.total)}%\n\n`;
+
+    prompt += `RESULTADOS POR MATERIA:\n`;
+    c.mats.forEach(mat=>{
+      const ms=s.matStats[mat]||{};
+      const mt=Object.values(ms).reduce((a,b)=>a+b,0);
+      const mp=pos.reduce((a,g)=>a+(ms[g]||0),0);
+      const mn=neg.reduce((a,g)=>a+(ms[g]||0),0);
+      prompt += `  ${mat}: ${grades.map(g=>`${g}=${ms[g]||0}`).join(' ')} → ${mt?pct(mp,mt):0}% pos`;
+      if(mn>0) prompt+=` ⚠️ ${mn} negativos`;
+      prompt+='\n';
+    });
+
+    prompt += `\nDATA ALUMNO A ALUMNO:\n`;
+    c.alumnos.forEach((a,i)=>{
+      const row = c.mats.map(m=>a.notas[m]||'—').join(' | ');
+      const tieneNeg = c.mats.some(m=>neg.includes(a.notas[m]));
+      prompt += `  Alumno ${i+1}: ${row}${tieneNeg?' ⚠️':''}\n`;
+    });
+
+    prompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Genera un ANÁLISIS COMPLETO DE CURSO con estos apartados:
+
+1. DIAGNÓSTICO GENERAL DEL GRUPO
+   - Caracterización del nivel del grupo
+   - Comparación del % positivos con lo esperable para el curso
+   - Cohesión del grupo: ¿hay gran dispersión entre el alumnado mejor y peor?
+
+2. ANÁLISIS MATERIA A MATERIA
+   Para cada materia:
+   - Resultados detallados con interpretación
+   - ¿Es una materia fortaleza o de riesgo para este grupo?
+   - Factores que pueden explicar los resultados
+   - Propuesta metodológica concreta si hay dificultades
+
+3. PERFIL DEL ALUMNADO
+   - Alumnado con excelencia: cuántos, en qué materias destacan
+   - Alumnado con dificultades: número, materias afectadas, posibles causas
+   - Alumnado en riesgo de no promoción: número y patrón de negativos
+   - Alumnado con posible ACI o refuerzo necesario
+
+4. PROPUESTAS DE MEJORA ESPECÍFICAS PARA ESTE CURSO
+   - Mínimo 6 propuestas concretas con responsable y plazo
+   - Estrategias de atención a la diversidad
+   - Recursos o materiales recomendados
+
+5. ACTIVIDADES DE REFUERZO Y ENRIQUECIMIENTO
+   - Plan de refuerzo: actividades, tiempos, agrupamientos
+   - Plan de enriquecimiento para alumnado con altas capacidades
+
+6. COMUNICACIÓN CON FAMILIAS
+   - Aspectos clave a trasladar en la reunión de familias
+   - Cómo presentar los datos de forma constructiva
+
+7. OBJETIVOS PARA EL PRÓXIMO TRIMESTRE
+   - 5 objetivos prioritarios concretos y medibles
+
+Extensión mínima: 1000 palabras.`;
+  }
+
+  prompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Datos generados automáticamente por la app de gestión de evaluaciones del CEIP Capitulaciones de Santa Fe — ${new Date().toLocaleDateString('es-ES')}*`;
 
   document.getElementById('cl-prompt-text').value = prompt;
   document.getElementById('cl-result').style.display = 'block';
-  toast('✅ Prompt generado');
+  toast('✅ Prompt generado — ' + prompt.length + ' caracteres');
 }
-
 function copyPrompt() {
   const text = document.getElementById('cl-prompt-text').value;
   navigator.clipboard.writeText(text).then(() => toast('📋 Copiado al portapapeles'));
