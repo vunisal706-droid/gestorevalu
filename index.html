@@ -927,20 +927,25 @@ function setDbStatus(status) {
     : 'Comprobando conexión...';
 }
 
-async function checkDbConnection() {
+function checkDbConnection() {
   setDbStatus('checking');
 
-  async function tryConnect() {
+  function tryConnect() {
     if (!window._firebaseReady || !window._db) {
       setDbStatus('warn');
       return;
     }
     try {
-      await window._db.ref('.info/connected').get();
-      setDbStatus('ok');
-      state.useFirebase = true;
-      await loadFromFirebase();
-      subscribeFirebase();
+      // .info/connected solo funciona con listener, no con .get()
+      window._db.ref('.info/connected').on('value', snap => {
+        if (snap.val() === true) {
+          setDbStatus('ok');
+          state.useFirebase = true;
+        } else {
+          setDbStatus('warn');
+          state.useFirebase = false;
+        }
+      });
     } catch(e) {
       console.warn('Firebase check:', e);
       setDbStatus('warn');
@@ -949,95 +954,18 @@ async function checkDbConnection() {
   }
 
   if (window._db) {
-    await tryConnect();
+    tryConnect();
   } else {
-    document.addEventListener('firebase-ready', async () => {
-      await tryConnect();
+    document.addEventListener('firebase-ready', () => {
+      tryConnect();
     }, { once: true });
-    setTimeout(async () => {
+    setTimeout(() => {
       if (!state.useFirebase) {
-        if (window._db) await tryConnect();
+        if (window._db) tryConnect();
         else setDbStatus('warn');
       }
     }, 6000);
   }
-}
-
-// ── Carga todos los registros desde Firebase y fusiona con localStorage ──
-async function loadFromFirebase() {
-  try {
-    const snap = await window._db.ref('evaluaciones').get();
-    if (!snap.exists()) return;
-    const allDocs = snap.val();
-    let changed = false;
-    Object.entries(allDocs).forEach(([key, doc]) => {
-      if (!doc) return;
-      let { anyo, trimestre, cursoId, tipo, mats, alumnos, stats, updatedAt } = doc;
-      // Si faltan campos los parseamos de la key: "2025-2026_T1_1ep"
-      if (!anyo || !trimestre || !cursoId) {
-        const m = key.match(/^(\d{4}[-\/]\d{4})_T(\d)_(.+)$/);
-        if (!m) return;
-        anyo = m[1].replace('-', '/');
-        trimestre = parseInt(m[2]);
-        cursoId = m[3];
-      } else {
-        anyo = String(anyo).replace('-', '/');
-        trimestre = parseInt(trimestre);
-      }
-      if (!tipo || !mats || !alumnos) return;
-      if (!state.datos[anyo]) state.datos[anyo] = {};
-      if (!state.datos[anyo][trimestre]) state.datos[anyo][trimestre] = {};
-      const local = state.datos[anyo][trimestre][cursoId];
-      const fbDate = updatedAt || '';
-      const localDate = local?.updatedAt || '';
-      if (!local || fbDate >= localDate) {
-        state.datos[anyo][trimestre][cursoId] = { tipo, mats, alumnos, stats, updatedAt: fbDate };
-        changed = true;
-      }
-    });
-    if (changed) {
-      saveState();
-      updateInicioDashboard();
-      populateCursosChips();
-      populateInformeSelects();
-      populateComparativaSelects();
-      toast('☁️ Datos sincronizados desde Firebase');
-    }
-  } catch(e) {
-    console.warn('Firebase load error:', e);
-  }
-}
-
-// ── Escucha cambios en tiempo real ──
-let _fbListener = null;
-function subscribeFirebase() {
-  if (_fbListener) return;
-  _fbListener = true;
-  const handleSnap = (snap) => {
-    const doc = snap.val();
-    if (!doc) return;
-    let { anyo, trimestre, cursoId, tipo, mats, alumnos, stats, updatedAt } = doc;
-    if (!anyo || !trimestre || !cursoId) {
-      const m = snap.key.match(/^(\d{4}[-\/]\d{4})_T(\d)_(.+)$/);
-      if (!m) return;
-      anyo = m[1].replace('-', '/');
-      trimestre = parseInt(m[2]);
-      cursoId = m[3];
-    } else {
-      anyo = String(anyo).replace('-', '/');
-      trimestre = parseInt(trimestre);
-    }
-    if (!tipo || !mats || !alumnos) return;
-    if (!state.datos[anyo]) state.datos[anyo] = {};
-    if (!state.datos[anyo][trimestre]) state.datos[anyo][trimestre] = {};
-    state.datos[anyo][trimestre][cursoId] = { tipo, mats, alumnos, stats, updatedAt };
-    saveState();
-    updateInicioDashboard();
-    populateCursosChips();
-    toast('🔄 Datos actualizados desde otro dispositivo');
-  };
-  window._db.ref('evaluaciones').on('child_changed', handleSnap);
-  window._db.ref('evaluaciones').on('child_added', handleSnap);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1056,13 +984,8 @@ function init() {
   // Firebase pre-configured — skip overlay
   const cfg = getFirebaseConfig() || {
     apiKey: "AIzaSyAiPUQqT5nUi5Sme4N6N2_cTsKP5-u44Us",
-    authDomain: "capitulaciones-b377a.firebaseapp.com",
-    databaseURL: "https://capitulaciones-b377a-default-rtdb.europe-west1.firebasedatabase.app",
     projectId: "capitulaciones-b377a",
-    storageBucket: "capitulaciones-b377a.firebasestorage.app",
-    messagingSenderId: "1057770341975",
-    appId: "1:1057770341975:web:9320daeca26839753a4512",
-    measurementId: "G-NW8Z9NHYE8"
+    appId: "1:1057770341975:web:9320daeca26839753a4512"
   };
   localStorage.setItem('cap_firebase', JSON.stringify(cfg));
   localStorage.setItem('localOnly', '');
@@ -1352,48 +1275,209 @@ async function parseFile() {
   }
 }
 
-// ── Parse DOCX using mammoth ──────────────────────────────────
+// ── Parse DOCX usando mammoth HTML (respeta celdas vacías) ────
 async function parseDocx(file, tipo) {
   const arrayBuffer = await file.arrayBuffer();
+
+  // Primero intentar con HTML para respetar estructura de tabla
+  try {
+    const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
+    const html = htmlResult.value;
+
+    const prev = document.getElementById('imp-preview-raw');
+    prev.style.display='block';
+    prev.textContent = html.replace(/<[^>]+>/g,' ').slice(0,500) + '...';
+
+    const rows = parseDocxHtmlTable(html, tipo);
+    if (rows && rows.length > 0) return rows;
+  } catch(e) {
+    console.warn('HTML parse failed, fallback to text:', e);
+  }
+
+  // Fallback: texto plano
   const result = await mammoth.extractRawText({ arrayBuffer });
   const text = result.value;
-
-  // Show raw preview
   const prev = document.getElementById('imp-preview-raw');
   prev.style.display='block';
   prev.textContent = text.slice(0,500) + (text.length>500?'...':'');
-
   return parseTextTable(text, tipo);
 }
 
-// ── Parse ODT using pandoc-style text extraction ──────────────
+// ── Parsear tabla HTML de mammoth respetando celdas vacías ────
+function parseDocxHtmlTable(html, tipo) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const tables = doc.querySelectorAll('table');
+  if (!tables.length) return null;
+
+  const gradePattern = /^(SB|NT|BI|SU|IN|EXC|BUE|ADE|NAD|BL)$/i;
+  const knownMats = ['ING','REL','REV','ATEDU','CA','DEE','CRR','CMN','LCL','MAT','EFI','EAR','FR2','ALCT','VCE'];
+
+  function cellText(td) {
+    return td.textContent.replace(/\s+/g,' ').trim().toUpperCase();
+  }
+
+  // Construir la cuadrícula lógica de la tabla expandiendo colspan/rowspan
+  function buildGrid(table) {
+    const trs = Array.from(table.querySelectorAll('tr'));
+    const grid = [];
+    const pending = [];
+
+    trs.forEach((tr, ri) => {
+      if (!grid[ri]) grid[ri] = [];
+      pending.forEach(p => {
+        if (p.remaining > 0) { grid[ri][p.col] = p.text; p.remaining--; }
+      });
+      const tds = Array.from(tr.querySelectorAll('td,th'));
+      let logicalCol = 0;
+      tds.forEach(td => {
+        while (grid[ri][logicalCol] !== undefined) logicalCol++;
+        const text = cellText(td);
+        const colspan = parseInt(td.getAttribute('colspan') || '1');
+        const rowspan = parseInt(td.getAttribute('rowspan') || '1');
+        for (let c = 0; c < colspan; c++) grid[ri][logicalCol + c] = text;
+        if (rowspan > 1) {
+          for (let c = 0; c < colspan; c++)
+            pending.push({ col: logicalCol + c, text, remaining: rowspan - 1 });
+        }
+        logicalCol += colspan;
+      });
+    });
+    return grid;
+  }
+
+  for (const tbl of tables) {
+    const grid = buildGrid(tbl);
+    if (grid.length < 3) continue;
+
+    // Buscar fila de cabecera
+    let headerRow = -1;
+    let headerColMap = {};
+    for (let ri = 0; ri < Math.min(4, grid.length); ri++) {
+      const row = grid[ri] || [];
+      const map = {};
+      row.forEach((text, ci) => { if (knownMats.includes(text)) map[ci] = text; });
+      if (Object.keys(map).length >= 2) { headerRow = ri; headerColMap = map; break; }
+    }
+    if (headerRow === -1) continue;
+
+    // Parsear filas de datos
+    const rows = [];
+    for (let ri = headerRow + 1; ri < grid.length; ri++) {
+      const row = grid[ri] || [];
+      const hasGrade = row.some(t => t && gradePattern.test(t));
+      if (!hasGrade) continue;
+
+      const notas = {};
+      Object.entries(headerColMap).forEach(([ci, mat]) => {
+        const val = (row[parseInt(ci)] || '').replace(/[*†‡]/g,'');
+        notas[mat] = gradePattern.test(val) ? val.toUpperCase() : '';
+      });
+      rows.push({ id: rows.length + 1, notas, _structured: true });
+    }
+    if (rows.length > 0) return rows;
+  }
+  return null;
+}
+
+// ── Parse ODT usando XML con grid (respeta celdas vacías) ─────
 async function parseOdt(file, tipo) {
-  // ODT is a ZIP — extract content.xml
   const arrayBuffer = await file.arrayBuffer();
   try {
-    // Use JSZip if available, otherwise fall back to text parsing
-    const text = await extractOdtText(arrayBuffer);
+    if (!window.JSZip) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+    }
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const contentXml = await zip.file('content.xml').async('string');
+
+    const rows = parseOdtXmlTable(contentXml, tipo);
+    if (rows && rows.length > 0) {
+      const prev = document.getElementById('imp-preview-raw');
+      prev.style.display = 'block';
+      prev.textContent = `ODT: ${rows.length} alumnos detectados`;
+      return rows;
+    }
+    // fallback texto plano
+    const text = contentXml.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
     return parseTextTable(text, tipo);
   } catch(e) {
-    // Fallback: try reading as text
+    console.warn('ODT parse error:', e);
     const text = await file.text();
     return parseTextTable(text, tipo);
   }
 }
 
-async function extractOdtText(buf) {
-  // Simple XML text extraction from ODT (ZIP)
-  const bytes = new Uint8Array(buf);
-  const zip = await (async () => {
-    // Load JSZip dynamically
-    if (!window.JSZip) {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+function parseOdtXmlTable(xml, tipo) {
+  const gradePattern = /^(SB|NT|BI|SU|IN|EXC|BUE|ADE|NAD|BL)$/i;
+  const knownMats = ['ING','REL','REV','ATEDU','CA','DEE','CRR','CMN','LCL','MAT','EFI','EAR','FR2','ALCT','VCE'];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'text/xml');
+  const tables = doc.querySelectorAll('table\\:table, table');
+  if (!tables.length) return null;
+
+  function getCellText(cell) {
+    const paras = cell.querySelectorAll('text\\:p, p');
+    if (paras.length) return Array.from(paras).map(p => p.textContent.trim()).join(' ').trim().toUpperCase();
+    return cell.textContent.trim().toUpperCase();
+  }
+
+  for (const tbl of tables) {
+    const trows = tbl.querySelectorAll('table\\:table-row, table-row');
+    if (!trows.length) continue;
+
+    const grid = [];
+    trows.forEach((tr, ri) => {
+      if (!grid[ri]) grid[ri] = [];
+      const cells = Array.from(tr.children).filter(el =>
+        el.tagName && (el.tagName.includes('table-cell') || el.tagName.includes('covered'))
+      );
+      let ci = 0;
+      cells.forEach(cell => {
+        while (grid[ri][ci] !== undefined) ci++;
+        const isCovered = cell.tagName && cell.tagName.includes('covered');
+        const text = isCovered ? '' : getCellText(cell);
+        const colsRep = parseInt(cell.getAttribute('table:number-columns-repeated') || cell.getAttribute('number-columns-repeated') || '1');
+        const rowsSpan = parseInt(cell.getAttribute('table:number-rows-spanned') || cell.getAttribute('number-rows-spanned') || '1');
+        for (let c = 0; c < colsRep; c++) {
+          grid[ri][ci + c] = text;
+          if (rowsSpan > 1) {
+            for (let r = 1; r < rowsSpan; r++) {
+              if (!grid[ri + r]) grid[ri + r] = [];
+              grid[ri + r][ci + c] = text;
+            }
+          }
+        }
+        ci += colsRep;
+      });
+    });
+
+    if (grid.length < 3) continue;
+
+    let headerRow = -1, headerColMap = {};
+    for (let ri = 0; ri < Math.min(4, grid.length); ri++) {
+      const row = grid[ri] || [];
+      const map = {};
+      row.forEach((text, ci) => { if (text && knownMats.includes(text.trim())) map[ci] = text.trim(); });
+      if (Object.keys(map).length >= 2) { headerRow = ri; headerColMap = map; break; }
     }
-    return await JSZip.loadAsync(buf);
-  })();
-  const contentXml = await zip.file('content.xml').async('string');
-  // Strip XML tags
-  return contentXml.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    if (headerRow === -1) continue;
+
+    const rows = [];
+    for (let ri = headerRow + 1; ri < grid.length; ri++) {
+      const row = grid[ri] || [];
+      const hasGrade = row.some(t => t && gradePattern.test(t.trim()));
+      if (!hasGrade) continue;
+      const notas = {};
+      Object.entries(headerColMap).forEach(([ci, mat]) => {
+        const val = (row[parseInt(ci)] || '').trim().replace(/[*†‡]/g,'');
+        notas[mat] = gradePattern.test(val) ? val.toUpperCase() : '';
+      });
+      rows.push({ id: rows.length + 1, notas, _structured: true });
+    }
+    if (rows.length > 0) return rows;
+  }
+  return null;
 }
 
 // ── Parse PDF using pdf.js ────────────────────────────────────
@@ -1540,11 +1624,14 @@ function renderImportPreview(rows, tipo, cursoId) {
     return;
   }
 
-  // Check for issues
+  // Check for issues (solo para formato legacy sin _structured)
   let warnings = [];
   rows.forEach((r,i) => {
-    if (r.notas.length < mats.filter(m=>m!=='REL'&&m!=='ATEDU').length) {
-      warnings.push(`Alumno ${i+1}: ${r.notas.length} notas detectadas (esperadas ~${mats.length})`);
+    if (!r._structured && Array.isArray(r.notas)) {
+      const coreCount = mats.filter(m=>m!=='REL'&&m!=='REV'&&m!=='ATEDU').length;
+      if (r.notas.length < coreCount) {
+        warnings.push(`Alumno ${i+1}: ${r.notas.length} notas detectadas (esperadas ~${mats.length})`);
+      }
     }
   });
 
@@ -1557,8 +1644,6 @@ function renderImportPreview(rows, tipo, cursoId) {
 
   // Render editable table
   const grades = gradeList(tipo);
-  const gradeOpts = grades.map(g => `<option value="${g}">${g}</option>`).join('') +
-    '<option value="">—</option>';
 
   let html = `<table><thead><tr><th>Nº</th>` +
     mats.map(m => `<th>${m}</th>`).join('') + `</tr></thead><tbody>`;
@@ -1566,12 +1651,12 @@ function renderImportPreview(rows, tipo, cursoId) {
   rows.forEach((row, ri) => {
     html += `<tr><td>${ri+1}</td>`;
     mats.forEach((mat, mi) => {
-      const val = row.notas[mi] || '';
+      const val = getNotaFromRow(row, mat, mi);
       const cls = val ? `g-${val}` : 'g-empty';
-      html += `<td><select class="grade-sel" data-row="${ri}" data-mat="${mi}"
+      html += `<td><select class="grade-sel" data-row="${ri}" data-mat="${mat}"
         style="border:none;background:transparent;font-weight:700;font-size:12px;
         color:inherit;cursor:pointer;padding:2px 4px;border-radius:4px"
-        onchange="updateParsedGrade(${ri},${mi},this.value)">
+        onchange="updateParsedGrade(${ri},'${mat}',this.value)">
         ${grades.map(g=>`<option value="${g}" ${g===val?'selected':''}>${g}</option>`).join('')}
         <option value="" ${!val?'selected':''}>—</option>
       </select></td>`;
@@ -1583,9 +1668,20 @@ function renderImportPreview(rows, tipo, cursoId) {
   document.getElementById('imp-table-wrap').innerHTML = html;
 }
 
-function updateParsedGrade(ri, mi, val) {
-  if (state.imp.parsed && state.imp.parsed.rows[ri]) {
-    state.imp.parsed.rows[ri].notas[mi] = val;
+function getNotaFromRow(row, mat, mi) {
+  if (row._structured && row.notas && typeof row.notas === 'object' && !Array.isArray(row.notas)) {
+    return row.notas[mat] || '';
+  }
+  return (Array.isArray(row.notas) ? row.notas[mi] : '') || '';
+}
+
+function updateParsedGrade(ri, matOrIdx, val) {
+  if (!state.imp.parsed || !state.imp.parsed.rows[ri]) return;
+  const row = state.imp.parsed.rows[ri];
+  if (row._structured) {
+    row.notas[matOrIdx] = val;
+  } else {
+    row.notas[matOrIdx] = val;
   }
 }
 
@@ -1600,7 +1696,7 @@ function saveImport() {
   // Build structured students array
   const alumnos = rows.map((row, i) => {
     const notas = {};
-    mats.forEach((mat, mi) => { notas[mat] = row.notas[mi] || ''; });
+    mats.forEach((mat, mi) => { notas[mat] = getNotaFromRow(row, mat, mi); });
     return { id: 'a' + (i+1), num: i+1, notas };
   });
 
@@ -1613,7 +1709,7 @@ function saveImport() {
 
   saveState();
 
-  // Firebase save — clave sin '/' ni '.' para que Realtime Database no falle
+  // Firebase save — clave sin '/' para que Realtime Database no falle
   if (state.useFirebase && window._saveDoc) {
     const fbKey = (state.anyo + '_T' + state.trimestre + '_' + cursoId)
       .replace(/\//g, '-').replace(/\./g, '_');
