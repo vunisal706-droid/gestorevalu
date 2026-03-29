@@ -271,8 +271,8 @@ tbody td:first-child{text-align:left;font-weight:500}
 .step.active .step-lbl{color:var(--azul)}
 
 /* ── CHART ── */
-.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.chart-wrap{height:220px;position:relative}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.chart-wrap{height:240px;position:relative}
 .chart-card{background:#fff;border-radius:var(--r);box-shadow:var(--shadow);padding:16px}
 
 /* ── COMPARATIVA ── */
@@ -879,18 +879,10 @@ if ('serviceWorker' in navigator) {
         </select>
       </div>
       <hr style="margin:16px 0;border-color:var(--grisC)">
-      <div class="form-group">
-        <label class="form-label">Firebase — API Key</label>
-        <input class="form-input" id="scfg-apiKey" placeholder="AIzaSy...">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Firebase — Project ID</label>
-        <input class="form-input" id="scfg-projectId" placeholder="ceip-capitulaciones">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Firebase — App ID</label>
-        <input class="form-input" id="scfg-appId" placeholder="1:123456:web:abcdef">
-      </div>
+      <!-- Firebase fields ocultos — configurados en el código -->
+      <input type="hidden" id="scfg-apiKey" value="AIzaSyAiPUQqT5nUi5Sme4N6N2_cTsKP5-u44Us">
+      <input type="hidden" id="scfg-projectId" value="capitulaciones-b377a">
+      <input type="hidden" id="scfg-appId" value="1:1057770341975:web:9320daeca26839753a4512">
       <hr style="margin:16px 0;border-color:var(--grisC)">
       <div class="form-group">
         <label class="form-label">⚠️ Zona peligrosa</label>
@@ -2015,7 +2007,7 @@ function selectCurso(cursoId) {
   const grades = gradeList(c.tipo);
   const stats = c.stats;
 
-  // KPIs
+  // ── KPIs ──────────────────────────────────────────────────────
   let kpiHtml = `<div class="kpi-grid">`;
   grades.forEach(g => {
     const cnt = stats.counts[g] || 0;
@@ -2027,53 +2019,102 @@ function selectCurso(cursoId) {
   });
   const posPct = stats.total ? Math.round(stats.pos/stats.total*100) : 0;
   const negPct = stats.total ? Math.round(stats.neg/stats.total*100) : 0;
+  const numAlumnos = c.alumnos ? c.alumnos.length : 0;
   kpiHtml += `<div class="kpi pos"><div class="kpi-val">${posPct}%</div>
     <div class="kpi-lbl">✅ Positivos</div></div>`;
   if (negPct > 0) kpiHtml += `<div class="kpi neg"><div class="kpi-val">${negPct}%</div>
     <div class="kpi-lbl">❌ Negativos</div></div>`;
+  kpiHtml += `<div class="kpi sb"><div class="kpi-val">${numAlumnos}</div>
+    <div class="kpi-lbl">👨‍🎓 Alumnos</div></div>`;
+  kpiHtml += `<div class="kpi pos"><div class="kpi-val">${c.mats.length}</div>
+    <div class="kpi-lbl">📚 Materias</div></div>`;
   kpiHtml += `</div>`;
 
-  // Materia table
-  let tblHtml = `<div class="card"><div class="card-title">📊 Por materia</div>
-    <div class="table-wrap"><table>
-    <thead><tr><th>Materia</th>` + grades.map(g=>`<th>${g}</th>`).join('') +
-    `<th>% Pos</th></tr></thead><tbody>`;
-
+  // ── Mejor y peor materia ──────────────────────────────────────
+  const matPctMap = {};
   c.mats.forEach(mat => {
     const ms = stats.matStats[mat] || {};
     const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
     const matPos = grades.filter(g => stats.posGrades.includes(g))
       .reduce((a,g) => a+(ms[g]||0), 0);
-    const matPct = matTotal ? Math.round(matPos/matTotal*100) : 0;
-    const alert = stats.negGrades.length && matTotal ?
-      (grades.filter(g=>stats.negGrades.includes(g)).reduce((a,g)=>a+(ms[g]||0),0)/matTotal*100) : 0;
+    matPctMap[mat] = matTotal ? Math.round(matPos/matTotal*100) : 0;
+  });
+  const matsSorted = c.mats.slice().sort((a,b) => matPctMap[b]-matPctMap[a]);
+  const mejorMat = matsSorted[0];
+  const peorMat = matsSorted[matsSorted.length-1];
+
+  // ── Alumnos con todas positivas / algún negativo ───────────────
+  const posGradesSet = new Set(stats.posGrades);
+  const negGradesSet = new Set(stats.negGrades);
+  let alumnosTodosPos = 0, alumnosMayoriaPos = 0, alumnosConNeg = 0;
+  if (c.alumnos) {
+    c.alumnos.forEach(a => {
+      const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+      if (!notas.length) return;
+      const negCount = notas.filter(v => negGradesSet.has(v)).length;
+      const posCount = notas.filter(v => posGradesSet.has(v)).length;
+      if (negCount === 0 && posCount > 0) alumnosTodosPos++;
+      else if (posCount > notas.length / 2) alumnosMayoriaPos++;
+      if (negCount > 0) alumnosConNeg++;
+    });
+  }
+
+  // ── Tabla por materia ─────────────────────────────────────────
+  let tblHtml = `<div class="card"><div class="card-title">📊 Resultados por materia</div>
+    <div class="table-wrap"><table>
+    <thead><tr><th>Materia</th>` + grades.map(g=>`<th>${g}</th>`).join('') +
+    `<th>% Pos</th><th>Ranking</th></tr></thead><tbody>`;
+
+  matsSorted.forEach((mat, rank) => {
+    const ms = stats.matStats[mat] || {};
+    const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
+    const matPct = matPctMap[mat];
+    const emoji = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : '';
     tblHtml += `<tr><td>${mat}</td>` +
       grades.map(g => {
         const v = ms[g]||0;
         return v ? `<td><span class="pill g-${g}">${v}</span></td>` : '<td>—</td>';
       }).join('') +
-      `<td style="font-weight:700;color:${matPct>=80?'var(--verdeM)':'var(--rojo)'}">${matPct}%</td></tr>`;
+      `<td style="font-weight:700;color:${matPct>=80?'var(--verdeM)':matPct>=60?'var(--ambar)':'var(--rojo)'}">${matPct}%</td>
+       <td style="text-align:center">${emoji || '#'+(rank+1)}</td></tr>`;
   });
   tblHtml += `</tbody></table></div></div>`;
 
-  // Students table
-  let stuHtml = `<div class="card"><div class="card-title">👨‍🎓 Alumnos (${c.alumnos.length})</div>
+  // ── Tabla de alumnos ──────────────────────────────────────────
+  let stuHtml = `<div class="card"><div class="card-title">👨‍🎓 Alumnos (${numAlumnos})</div>
     <div class="table-wrap"><table>
     <thead><tr><th>Nº</th>` + c.mats.map(m=>`<th>${m}</th>`).join('') +
-    `</tr></thead><tbody>`;
-  c.alumnos.forEach((a,i) => {
-    stuHtml += `<tr><td>${i+1}</td>` +
-      c.mats.map(m => {
-        const v = a.notas[m] || '';
-        return v ? `<td><span class="pill g-${v}">${v}</span></td>` :
-          `<td class="g-empty">—</td>`;
-      }).join('') + `</tr>`;
-  });
+    `<th>% Pos</th></tr></thead><tbody>`;
+  if (c.alumnos) {
+    c.alumnos.forEach((a,i) => {
+      const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+      const posCount = notas.filter(v => posGradesSet.has(v)).length;
+      const alumPct = notas.length ? Math.round(posCount/notas.length*100) : 0;
+      stuHtml += `<tr><td>${i+1}</td>` +
+        c.mats.map(m => {
+          const v = a.notas[m] || '';
+          return v ? `<td><span class="pill g-${v}">${v}</span></td>` :
+            `<td class="g-empty">—</td>`;
+        }).join('') +
+        `<td style="font-weight:700;color:${alumPct>=80?'var(--verdeM)':alumPct>=60?'var(--ambar)':'var(--rojo)'}">
+          ${alumPct}%</td></tr>`;
+    });
+  }
   stuHtml += `</tbody></table></div></div>`;
+
+  // ── Alertas ───────────────────────────────────────────────────
+  let alertHtml = '';
+  if (negPct === 0) {
+    alertHtml = `<div class="alert alert-ok">✅ <strong>¡Excelente!</strong> No hay ningún resultado negativo en este curso.</div>`;
+  } else if (negPct > 20) {
+    alertHtml = `<div class="alert alert-warn">⚠️ <strong>Atención:</strong> El ${negPct}% de los resultados son negativos. Se recomienda un plan de mejora.</div>`;
+  } else {
+    alertHtml = `<div class="alert alert-amber">🔶 <strong>Seguimiento necesario:</strong> Hay un ${negPct}% de resultados negativos.</div>`;
+  }
 
   detail.innerHTML = `
     <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <h2 style="font-family:'Crimson Pro',serif;font-size:22px;color:var(--azul)">${cfg.label}</h2>
+      <h2 style="font-family:'Crimson Pro',serif;font-size:22px;color:var(--azul)">${cfg.label} — T${state.trimestre}</h2>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="showSection('importar');autoSelect('${cursoId}')">
           ✏️ Editar notas
@@ -2083,18 +2124,72 @@ function selectCurso(cursoId) {
         </button>
       </div>
     </div>
+
+    ${alertHtml}
     ${kpiHtml}
+
+    <!-- Resumen ejecutivo -->
+    <div class="card" style="border-left:4px solid var(--azulM)">
+      <div class="card-title">🧠 Resumen ejecutivo</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:13px">
+        <div style="background:#F0F4FF;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:var(--azulM);margin-bottom:4px">🥇 Mejor materia</div>
+          <div style="font-size:18px;font-weight:800;color:var(--verdeM)">${mejorMat}</div>
+          <div style="color:var(--gris)">${matPctMap[mejorMat]}% positivos</div>
+        </div>
+        <div style="background:#FFF8E1;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:var(--ambar);margin-bottom:4px">⚠️ Materia con más dificultad</div>
+          <div style="font-size:18px;font-weight:800;color:var(--rojo)">${peorMat}</div>
+          <div style="color:var(--gris)">${matPctMap[peorMat]}% positivos</div>
+        </div>
+        <div style="background:#E8F5E9;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:var(--verdeM);margin-bottom:4px">⭐ Sin ningún negativo</div>
+          <div style="font-size:18px;font-weight:800;color:var(--verdeM)">${alumnosTodosPos}</div>
+          <div style="color:var(--gris)">alumnos (${numAlumnos ? Math.round(alumnosTodosPos/numAlumnos*100) : 0}%)</div>
+        </div>
+        <div style="background:#FFEBEE;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:var(--rojo);margin-bottom:4px">❌ Con algún negativo</div>
+          <div style="font-size:18px;font-weight:800;color:var(--rojo)">${alumnosConNeg}</div>
+          <div style="color:var(--gris)">alumnos (${numAlumnos ? Math.round(alumnosConNeg/numAlumnos*100) : 0}%)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fila 1: Dona + Barras apiladas -->
     <div class="chart-grid">
-      <div class="chart-card"><div class="card-title">🍩 Distribución general</div>
+      <div class="chart-card"><div class="card-title">🍩 Distribución global de calificaciones</div>
         <div class="chart-wrap"><canvas id="c-dona-${cursoId}"></canvas></div></div>
-      <div class="chart-card"><div class="card-title">📊 Por materia</div>
+      <div class="chart-card"><div class="card-title">📊 Calificaciones apiladas por materia</div>
         <div class="chart-wrap"><canvas id="c-bar-${cursoId}"></canvas></div></div>
     </div>
+
+    <!-- Fila 2: % Positivos por materia + Radar -->
+    <div class="chart-grid">
+      <div class="chart-card"><div class="card-title">📈 % Positivos por materia (ranking)</div>
+        <div class="chart-wrap"><canvas id="c-hbar-${cursoId}"></canvas></div></div>
+      <div class="chart-card"><div class="card-title">🕸️ Perfil del curso (radar)</div>
+        <div class="chart-wrap"><canvas id="c-radar-${cursoId}"></canvas></div></div>
+    </div>
+
+    <!-- Fila 3: Distribución por alumno + Negativos por materia -->
+    <div class="chart-grid">
+      <div class="chart-card"><div class="card-title">👤 % Positivos por alumno</div>
+        <div class="chart-wrap" style="height:260px"><canvas id="c-alumnos-${cursoId}"></canvas></div></div>
+      <div class="chart-card"><div class="card-title">🔴 Negativos por materia</div>
+        <div class="chart-wrap"><canvas id="c-neg-${cursoId}"></canvas></div></div>
+    </div>
+
+    <!-- Fila 4: Mapa de calor alumnos x materias (si hay datos) -->
+    <div class="card">
+      <div class="card-title">🗺️ Mapa de calor — Alumnos × Materias</div>
+      <div id="c-heatmap-${cursoId}" style="overflow-x:auto"></div>
+    </div>
+
     ${tblHtml}
     ${stuHtml}
   `;
 
-  // Render charts
+  // Render all charts
   setTimeout(() => renderCursoCharts(cursoId, c, grades), 50);
 }
 
@@ -2104,26 +2199,60 @@ function renderCursoCharts(id, c, grades) {
     EXC:'#1565C0',BUE:'#2E7D32',ADE:'#F57F17',NAD:'#C62828',
     BL:'#B0BEC5'
   };
+  const COLORS_BG = {
+    SB:'rgba(21,101,192,0.15)',NT:'rgba(46,125,50,0.15)',BI:'rgba(245,127,23,0.15)',
+    SU:'rgba(230,81,0,0.15)',IN:'rgba(198,40,40,0.15)',
+    EXC:'rgba(21,101,192,0.15)',BUE:'rgba(46,125,50,0.15)',
+    ADE:'rgba(245,127,23,0.15)',NAD:'rgba(198,40,40,0.15)'
+  };
 
-  // Destroy old
-  ['c-dona-'+id,'c-bar-'+id].forEach(cid => {
+  const allChartIds = ['c-dona-','c-bar-','c-hbar-','c-radar-','c-alumnos-','c-neg-'];
+  allChartIds.forEach(prefix => {
+    const cid = prefix+id;
     if (_charts[cid]) { _charts[cid].destroy(); delete _charts[cid]; }
   });
 
+  const posGradesSet = new Set(c.stats.posGrades || []);
+  const negGradesSet = new Set(c.stats.negGrades || []);
+
+  // Calcular % positivos por materia
+  const matPctMap = {};
+  const matNegMap = {};
+  c.mats.forEach(mat => {
+    const ms = c.stats.matStats[mat] || {};
+    const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
+    const matPos = grades.filter(g => posGradesSet.has(g)).reduce((a,g) => a+(ms[g]||0), 0);
+    const matNeg = grades.filter(g => negGradesSet.has(g)).reduce((a,g) => a+(ms[g]||0), 0);
+    matPctMap[mat] = matTotal ? Math.round(matPos/matTotal*100) : 0;
+    matNegMap[mat] = matNeg;
+  });
+
+  // ── 1. Gráfica de dona: distribución global ────────────────────
   const donaEl = document.getElementById('c-dona-'+id);
   if (donaEl) {
+    const total = grades.map(g => c.stats.counts[g]||0).reduce((a,b)=>a+b,0);
     _charts['c-dona-'+id] = new Chart(donaEl, {
       type:'doughnut',
       data:{
-        labels: grades,
+        labels: grades.map(g => `${g} (${c.stats.counts[g]||0})`),
         datasets:[{ data: grades.map(g=>c.stats.counts[g]||0),
-          backgroundColor: grades.map(g=>COLORS[g]||'#999'), borderWidth:2 }]
+          backgroundColor: grades.map(g=>COLORS[g]||'#999'),
+          borderWidth:3, borderColor:'#fff', hoverOffset:8 }]
       },
       options:{responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:12}}}}
+        plugins:{
+          legend:{position:'bottom',labels:{font:{size:11},boxWidth:14,padding:8}},
+          tooltip:{callbacks:{label: ctx => {
+            const pct = total ? Math.round(ctx.parsed/total*100) : 0;
+            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+          }}}
+        },
+        cutout:'55%'
+      }
     });
   }
 
+  // ── 2. Barras apiladas por materia ────────────────────────────
   const barEl = document.getElementById('c-bar-'+id);
   if (barEl) {
     _charts['c-bar-'+id] = new Chart(barEl, {
@@ -2134,13 +2263,197 @@ function renderCursoCharts(id, c, grades) {
           label:g,
           data: c.mats.map(m => c.stats.matStats[m]?.[g]||0),
           backgroundColor: COLORS[g]||'#999',
-          borderRadius:4
+          borderRadius:2
         }))
       },
       options:{responsive:true,maintainAspectRatio:false,
         plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
-        scales:{x:{stacked:true},y:{stacked:true,ticks:{stepSize:1}}}}
+        scales:{
+          x:{stacked:true,ticks:{font:{size:10}}},
+          y:{stacked:true,ticks:{stepSize:1},title:{display:true,text:'Nº alumnos',font:{size:10}}}
+        }
+      }
     });
+  }
+
+  // ── 3. Barras horizontales: % positivos por materia (ranking) ──
+  const hbarEl = document.getElementById('c-hbar-'+id);
+  if (hbarEl) {
+    const matsSortedPct = c.mats.slice().sort((a,b) => matPctMap[a]-matPctMap[b]);
+    const bgColors = matsSortedPct.map(m => {
+      const p = matPctMap[m];
+      return p>=80 ? 'rgba(46,125,50,0.8)' : p>=60 ? 'rgba(245,127,23,0.8)' : 'rgba(198,40,40,0.8)';
+    });
+    _charts['c-hbar-'+id] = new Chart(hbarEl, {
+      type:'bar',
+      data:{
+        labels: matsSortedPct,
+        datasets:[{
+          label:'% Positivos',
+          data: matsSortedPct.map(m => matPctMap[m]),
+          backgroundColor: bgColors,
+          borderRadius:4
+        }]
+      },
+      options:{
+        indexAxis:'y',
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{label: ctx => ` ${ctx.parsed.x}% positivos`}}
+        },
+        scales:{
+          x:{min:0,max:100,ticks:{callback:v=>v+'%'},
+            grid:{color:'rgba(0,0,0,0.05)'}},
+          y:{ticks:{font:{size:11}}}
+        }
+      }
+    });
+  }
+
+  // ── 4. Radar: perfil del curso ─────────────────────────────────
+  const radarEl = document.getElementById('c-radar-'+id);
+  if (radarEl) {
+    _charts['c-radar-'+id] = new Chart(radarEl, {
+      type:'radar',
+      data:{
+        labels: c.mats,
+        datasets:[{
+          label:'% Positivos',
+          data: c.mats.map(m => matPctMap[m]),
+          backgroundColor:'rgba(21,101,192,0.15)',
+          borderColor:'#1565C0',
+          borderWidth:2,
+          pointBackgroundColor:'#1565C0',
+          pointRadius:4
+        }]
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false}},
+        scales:{r:{
+          min:0, max:100,
+          ticks:{stepSize:25,callback:v=>v+'%',font:{size:9}},
+          pointLabels:{font:{size:10}},
+          grid:{color:'rgba(0,0,0,0.08)'}
+        }}
+      }
+    });
+  }
+
+  // ── 5. % positivos por alumno (línea) ─────────────────────────
+  const alumnosEl = document.getElementById('c-alumnos-'+id);
+  if (alumnosEl && c.alumnos && c.alumnos.length) {
+    const alumPcts = c.alumnos.map((a, i) => {
+      const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+      const posCount = notas.filter(v => posGradesSet.has(v)).length;
+      return notas.length ? Math.round(posCount/notas.length*100) : 0;
+    });
+    const alumColors = alumPcts.map(p => p>=80?'#2E7D32':p>=60?'#F57F17':'#C62828');
+    _charts['c-alumnos-'+id] = new Chart(alumnosEl, {
+      type:'bar',
+      data:{
+        labels: c.alumnos.map((_,i) => 'Alumno '+(i+1)),
+        datasets:[{
+          label:'% Positivos',
+          data: alumPcts,
+          backgroundColor: alumColors,
+          borderRadius:3
+        },{
+          label:'Media',
+          data: Array(c.alumnos.length).fill(
+            Math.round(alumPcts.reduce((a,b)=>a+b,0)/alumPcts.length)
+          ),
+          type:'line',
+          borderColor:'#1565C0',
+          borderWidth:2,
+          borderDash:[5,5],
+          pointRadius:0,
+          fill:false
+        }]
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'bottom',labels:{font:{size:10},boxWidth:12}},
+          tooltip:{callbacks:{label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`}}
+        },
+        scales:{
+          x:{ticks:{font:{size:9},maxRotation:45}},
+          y:{min:0,max:100,ticks:{callback:v=>v+'%'}}
+        }
+      }
+    });
+  }
+
+  // ── 6. Negativos por materia (barras) ─────────────────────────
+  const negEl = document.getElementById('c-neg-'+id);
+  if (negEl) {
+    const matsConNeg = c.mats.filter(m => matNegMap[m] > 0);
+    const matsOrdenadas = matsConNeg.length ? matsConNeg.sort((a,b)=>matNegMap[b]-matNegMap[a]) : c.mats;
+    _charts['c-neg-'+id] = new Chart(negEl, {
+      type:'bar',
+      data:{
+        labels: matsOrdenadas,
+        datasets: grades.filter(g => negGradesSet.has(g)).map(g => ({
+          label: g,
+          data: matsOrdenadas.map(m => c.stats.matStats[m]?.[g]||0),
+          backgroundColor: COLORS[g]||'#C62828',
+          borderRadius:3
+        }))
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},
+          title:{display: matsConNeg.length===0, text:'✅ No hay negativos en ninguna materia',
+            font:{size:13},color:'#2E7D32'}
+        },
+        scales:{
+          x:{ticks:{font:{size:10}}},
+          y:{ticks:{stepSize:1},title:{display:true,text:'Nº alumnos',font:{size:10}}}
+        }
+      }
+    });
+  }
+
+  // ── 7. Mapa de calor: alumnos × materias ─────────────────────
+  const hmDiv = document.getElementById('c-heatmap-'+id);
+  if (hmDiv && c.alumnos && c.alumnos.length) {
+    const gradeToColor = {
+      SB:'#1565C0',NT:'#2E7D32',BI:'#F57F17',SU:'#E65100',IN:'#C62828',
+      EXC:'#1565C0',BUE:'#2E7D32',ADE:'#F57F17',NAD:'#C62828',
+      BL:'#B0BEC5',''  :'#ECEFF1'
+    };
+    const gradeToText = {
+      SB:'#fff',NT:'#fff',BI:'#fff',SU:'#fff',IN:'#fff',
+      EXC:'#fff',BUE:'#fff',ADE:'#fff',NAD:'#fff',
+      BL:'#607D8B',''  :'#90A4AE'
+    };
+    let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;min-width:100%">
+      <thead><tr><th style="padding:6px 8px;background:#263238;color:#fff;position:sticky;left:0;z-index:1">Alumno</th>`;
+    c.mats.forEach(m => {
+      html += `<th style="padding:5px 6px;background:#263238;color:#fff;text-align:center;white-space:nowrap">${m}</th>`;
+    });
+    html += `<th style="padding:5px 8px;background:#263238;color:#fff">%Pos</th></tr></thead><tbody>`;
+
+    c.alumnos.forEach((a, i) => {
+      const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+      const posCount = notas.filter(v => posGradesSet.has(v)).length;
+      const alumPct = notas.length ? Math.round(posCount/notas.length*100) : 0;
+      const rowBg = i % 2 === 0 ? '#fff' : '#F8F9FC';
+      html += `<tr style="background:${rowBg}">
+        <td style="padding:5px 8px;font-weight:600;background:${rowBg};position:sticky;left:0;z-index:1;white-space:nowrap;border-right:2px solid #E0E0E0">Alum.${i+1}</td>`;
+      c.mats.forEach(m => {
+        const v = a.notas[m] || '';
+        const bg = gradeToColor[v] || '#ECEFF1';
+        const fg = gradeToText[v] || '#90A4AE';
+        html += `<td style="padding:4px 6px;text-align:center;background:${bg};color:${fg};font-weight:700;border:1px solid rgba(255,255,255,0.3)">${v||'—'}</td>`;
+      });
+      const pctColor = alumPct>=80?'#2E7D32':alumPct>=60?'#F57F17':'#C62828';
+      html += `<td style="padding:5px 8px;font-weight:800;color:${pctColor};text-align:center">${alumPct}%</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+    hmDiv.innerHTML = html;
+  } else if (hmDiv) {
+    hmDiv.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--gris)">Sin datos de alumnos</div>`;
   }
 }
 
