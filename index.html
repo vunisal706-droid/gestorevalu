@@ -628,6 +628,8 @@ if ('serviceWorker' in navigator) {
       <h2 style="font-family:'Crimson Pro',serif;color:var(--verde);font-size:26px">
         ¡Notas guardadas!</h2>
       <p style="color:var(--gris);margin:10px 0 24px" id="save-summary"></p>
+      <!-- Panel de validación de cuadraturas -->
+      <div id="quadrature-panel" style="text-align:left;margin:0 auto 24px;max-width:520px"></div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="resetImport()">📤 Importar otro curso</button>
         <button class="btn btn-blue" onclick="showSection('cursos')">📊 Ver cursos</button>
@@ -890,10 +892,10 @@ const CURSOS_CONFIG = {
   '5a':  { label:'5 Años',    tipo:'infantil', mats:['ING','REL','ATEDU','CA','DEE','CRR'] },
   // Primaria
   '1ep': { label:'1.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '2ep': { label:'2.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '3ep': { label:'3.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '4ep': { label:'4.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','ATEDU'] },
-  '5ep': { label:'5.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','REL','ATEDU'] },
+  '2ep': { label:'2.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'] },
+  '3ep': { label:'3.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'] },
+  '4ep': { label:'4.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','REL','REV','ATEDU'] },
+  '5ep': { label:'5.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','ALCT','REL','ATEDU'] },
   '6ep': { label:'6.º EP',    tipo:'primaria', mats:['CMN','EAR','EFI','LCL','ING','MAT','FR2','ALCT','VCE','REL','ATEDU'] },
   // TEA
   'tea': { label:'Aula TEA',  tipo:'tea',      mats:['ACCCI','ACL','ACPMF','REL'] },
@@ -927,25 +929,18 @@ function setDbStatus(status) {
     : 'Comprobando conexión...';
 }
 
-function checkDbConnection() {
+async function checkDbConnection() {
   setDbStatus('checking');
 
-  function tryConnect() {
+  async function tryConnect() {
     if (!window._firebaseReady || !window._db) {
       setDbStatus('warn');
       return;
     }
     try {
-      // .info/connected solo funciona con listener, no con .get()
-      window._db.ref('.info/connected').on('value', snap => {
-        if (snap.val() === true) {
-          setDbStatus('ok');
-          state.useFirebase = true;
-        } else {
-          setDbStatus('warn');
-          state.useFirebase = false;
-        }
-      });
+      await window._db.ref('.info/connected').get();
+      setDbStatus('ok');
+      state.useFirebase = true;
     } catch(e) {
       console.warn('Firebase check:', e);
       setDbStatus('warn');
@@ -953,15 +948,18 @@ function checkDbConnection() {
     }
   }
 
+  // If Firebase already loaded, try immediately
   if (window._db) {
-    tryConnect();
+    await tryConnect();
   } else {
-    document.addEventListener('firebase-ready', () => {
-      tryConnect();
+    // Wait for the firebase-ready event dispatched by the module script
+    document.addEventListener('firebase-ready', async () => {
+      await tryConnect();
     }, { once: true });
-    setTimeout(() => {
+    // Fallback timeout — if event never fires
+    setTimeout(async () => {
       if (!state.useFirebase) {
-        if (window._db) tryConnect();
+        if (window._db) await tryConnect();
         else setDbStatus('warn');
       }
     }, 6000);
@@ -1728,6 +1726,87 @@ function saveImport() {
   populateComparativaSelects();
   goImportStep(4);
   toast('✅ Notas guardadas correctamente');
+  checkQuadrature(alumnos, mats, cursoId);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VALIDACIÓN DE CUADRATURAS
+// ═══════════════════════════════════════════════════════════════
+function checkQuadrature(alumnos, mats, cursoId) {
+  const panel = document.getElementById('quadrature-panel');
+  if (!panel) return;
+
+  const totalAlumnos = alumnos.length;
+  const issues = [];
+  const oks = [];
+
+  // ── Cuadratura REL + REV + ATEDU ─────────────────────────────
+  const hasREL = mats.includes('REL');
+  const hasREV = mats.includes('REV');
+  const hasATEDU = mats.includes('ATEDU');
+
+  if (hasREL && hasATEDU) {
+    // Cada alumno debe tener exactamente UNO de {REL, REV, ATEDU}
+    let okReligion = 0, failReligion = [];
+    alumnos.forEach((a, i) => {
+      const rel   = a.notas['REL']   ? 1 : 0;
+      const rev   = hasREV && a.notas['REV'] ? 1 : 0;
+      const atedu = a.notas['ATEDU'] ? 1 : 0;
+      const sum = rel + rev + atedu;
+      if (sum === 1) okReligion++;
+      else failReligion.push(i + 1);
+    });
+
+    const grupoREL = hasREV ? 'REL + REV + ATEDU' : 'REL + ATEDU';
+    if (failReligion.length === 0) {
+      oks.push(`✅ <strong>${grupoREL}</strong>: todos los ${totalAlumnos} alumnos tienen exactamente una asignación`);
+    } else {
+      issues.push(`⚠️ <strong>${grupoREL}</strong>: ${failReligion.length} alumno/s con asignación incorrecta (nº: ${failReligion.join(', ')})`);
+    }
+  }
+
+  // ── Cuadratura FR2 + ALCT ─────────────────────────────────────
+  const hasFR2  = mats.includes('FR2');
+  const hasALCT = mats.includes('ALCT');
+
+  if (hasFR2 && hasALCT) {
+    let okFrances = 0, failFrances = [];
+    alumnos.forEach((a, i) => {
+      const fr2  = a.notas['FR2']  ? 1 : 0;
+      const alct = a.notas['ALCT'] ? 1 : 0;
+      const sum = fr2 + alct;
+      if (sum === 1) okFrances++;
+      else failFrances.push(i + 1);
+    });
+
+    if (failFrances.length === 0) {
+      oks.push(`✅ <strong>FR2 + ALCT</strong>: todos los ${totalAlumnos} alumnos tienen exactamente una asignación`);
+    } else {
+      issues.push(`⚠️ <strong>FR2 + ALCT</strong>: ${failFrances.length} alumno/s con asignación incorrecta (nº: ${failFrances.join(', ')})`);
+    }
+  }
+
+  // ── Renderizar panel ──────────────────────────────────────────
+  if (oks.length === 0 && issues.length === 0) {
+    panel.innerHTML = '';
+    return;
+  }
+
+  let html = `<div style="border-radius:10px;overflow:hidden;border:1px solid #ddd;font-size:13px">`;
+  html += `<div style="background:#263238;color:#fff;padding:10px 14px;font-weight:700">🔍 Verificación de cuadraturas — ${CURSOS_CONFIG[cursoId]?.label || cursoId}</div>`;
+
+  if (issues.length > 0) {
+    html += `<div style="background:#FFEBEE;padding:12px 14px;border-bottom:1px solid #FFCDD2">`;
+    html += issues.map(i => `<div style="margin:4px 0;color:#B71C1C">${i}</div>`).join('');
+    html += `</div>`;
+  }
+  if (oks.length > 0) {
+    html += `<div style="background:#E8F5E9;padding:12px 14px">`;
+    html += oks.map(o => `<div style="margin:4px 0;color:#1B5E20">${o}</div>`).join('');
+    html += `</div>`;
+  }
+  html += `</div>`;
+  panel.innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════════════════════
