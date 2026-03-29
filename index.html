@@ -929,18 +929,25 @@ function setDbStatus(status) {
     : 'Comprobando conexión...';
 }
 
-async function checkDbConnection() {
+function checkDbConnection() {
   setDbStatus('checking');
 
-  async function tryConnect() {
+  function tryConnect() {
     if (!window._firebaseReady || !window._db) {
       setDbStatus('warn');
       return;
     }
     try {
-      await window._db.ref('.info/connected').get();
-      setDbStatus('ok');
-      state.useFirebase = true;
+      // .info/connected solo funciona con listener en tiempo real, no con .get()
+      window._db.ref('.info/connected').on('value', function(snap) {
+        if (snap.val() === true) {
+          setDbStatus('ok');
+          state.useFirebase = true;
+        } else {
+          setDbStatus('warn');
+          state.useFirebase = false;
+        }
+      });
     } catch(e) {
       console.warn('Firebase check:', e);
       setDbStatus('warn');
@@ -948,18 +955,16 @@ async function checkDbConnection() {
     }
   }
 
-  // If Firebase already loaded, try immediately
   if (window._db) {
-    await tryConnect();
+    tryConnect();
   } else {
-    // Wait for the firebase-ready event dispatched by the module script
-    document.addEventListener('firebase-ready', async () => {
-      await tryConnect();
+    document.addEventListener('firebase-ready', function() {
+      tryConnect();
     }, { once: true });
-    // Fallback timeout — if event never fires
-    setTimeout(async () => {
+    // Fallback por si el evento no llega
+    setTimeout(function() {
       if (!state.useFirebase) {
-        if (window._db) await tryConnect();
+        if (window._db) tryConnect();
         else setDbStatus('warn');
       }
     }, 6000);
