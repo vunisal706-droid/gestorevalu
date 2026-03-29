@@ -68,10 +68,12 @@
     const firebaseConfig = {
       apiKey: "AIzaSyAiPUQqT5nUi5Sme4N6N2_cTsKP5-u44Us",
       authDomain: "capitulaciones-b377a.firebaseapp.com",
+      databaseURL: "https://capitulaciones-b377a-default-rtdb.europe-west1.firebasedatabase.app",
       projectId: "capitulaciones-b377a",
       storageBucket: "capitulaciones-b377a.firebasestorage.app",
       messagingSenderId: "1057770341975",
-      appId: "1:1057770341975:web:9320daeca26839753a4512"
+      appId: "1:1057770341975:web:9320daeca26839753a4512",
+      measurementId: "G-NW8Z9NHYE8"
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
@@ -937,9 +939,7 @@ async function checkDbConnection() {
       await window._db.ref('.info/connected').get();
       setDbStatus('ok');
       state.useFirebase = true;
-      // ── Cargar datos desde Firebase y fusionar con localStorage ──
       await loadFromFirebase();
-      // ── Escuchar cambios en tiempo real ──
       subscribeFirebase();
     } catch(e) {
       console.warn('Firebase check:', e);
@@ -948,7 +948,6 @@ async function checkDbConnection() {
     }
   }
 
-  // If Firebase already loaded, try immediately
   if (window._db) {
     await tryConnect();
   } else {
@@ -964,44 +963,40 @@ async function checkDbConnection() {
   }
 }
 
-// ── Carga todos los registros de evaluaciones desde Firebase ──
+// ── Carga todos los registros desde Firebase y fusiona con localStorage ──
 async function loadFromFirebase() {
   try {
     const snap = await window._db.ref('evaluaciones').get();
     if (!snap.exists()) return;
-    const allDocs = snap.val(); // { "2025/2026_T1_1ep": {...}, ... }
+    const allDocs = snap.val();
     let changed = false;
     Object.entries(allDocs).forEach(([key, doc]) => {
       if (!doc) return;
-      // Soportar claves antiguas "2025/2026_T1_1ep" y nuevas "2025-2026_T1_1ep"
-      let { anyo, trimestre, cursoId, tipo, mats, alumnos, stats } = doc;
-      // Si el doc no tiene anyo/trimestre/cursoId, intentar parsear la key
+      let { anyo, trimestre, cursoId, tipo, mats, alumnos, stats, updatedAt } = doc;
+      // Si faltan campos los parseamos de la key: "2025-2026_T1_1ep"
       if (!anyo || !trimestre || !cursoId) {
-        // key formato: "2025-2026_T1_1ep" o "2025/2026_T1_1ep"
         const m = key.match(/^(\d{4}[-\/]\d{4})_T(\d)_(.+)$/);
         if (!m) return;
-        anyo = m[1].replace('-','/');
+        anyo = m[1].replace('-', '/');
         trimestre = parseInt(m[2]);
         cursoId = m[3];
       } else {
-        anyo = String(anyo).replace('-','/');
+        anyo = String(anyo).replace('-', '/');
         trimestre = parseInt(trimestre);
       }
       if (!tipo || !mats || !alumnos) return;
       if (!state.datos[anyo]) state.datos[anyo] = {};
       if (!state.datos[anyo][trimestre]) state.datos[anyo][trimestre] = {};
-      // Solo sobreescribir si Firebase es más reciente o no existe localmente
       const local = state.datos[anyo][trimestre][cursoId];
-      const fbDate = doc.updatedAt || '';
+      const fbDate = updatedAt || '';
       const localDate = local?.updatedAt || '';
       if (!local || fbDate >= localDate) {
-        state.datos[anyo][trimestre][cursoId] = { tipo, mats, alumnos, stats,
-          updatedAt: fbDate };
+        state.datos[anyo][trimestre][cursoId] = { tipo, mats, alumnos, stats, updatedAt: fbDate };
         changed = true;
       }
     });
     if (changed) {
-      saveState(); // persiste la fusión en localStorage
+      saveState();
       updateInicioDashboard();
       populateCursosChips();
       populateInformeSelects();
@@ -1013,11 +1008,11 @@ async function loadFromFirebase() {
   }
 }
 
-// ── Escucha cambios en tiempo real (otro dispositivo guarda) ──
+// ── Escucha cambios en tiempo real ──
 let _fbListener = null;
 function subscribeFirebase() {
-  if (_fbListener) return; // ya suscrito
-  _fbListener = true; // mark as subscribed
+  if (_fbListener) return;
+  _fbListener = true;
   const handleSnap = (snap) => {
     const doc = snap.val();
     if (!doc) return;
@@ -1025,11 +1020,11 @@ function subscribeFirebase() {
     if (!anyo || !trimestre || !cursoId) {
       const m = snap.key.match(/^(\d{4}[-\/]\d{4})_T(\d)_(.+)$/);
       if (!m) return;
-      anyo = m[1].replace('-','/');
+      anyo = m[1].replace('-', '/');
       trimestre = parseInt(m[2]);
       cursoId = m[3];
     } else {
-      anyo = String(anyo).replace('-','/');
+      anyo = String(anyo).replace('-', '/');
       trimestre = parseInt(trimestre);
     }
     if (!tipo || !mats || !alumnos) return;
@@ -1061,8 +1056,13 @@ function init() {
   // Firebase pre-configured — skip overlay
   const cfg = getFirebaseConfig() || {
     apiKey: "AIzaSyAiPUQqT5nUi5Sme4N6N2_cTsKP5-u44Us",
+    authDomain: "capitulaciones-b377a.firebaseapp.com",
+    databaseURL: "https://capitulaciones-b377a-default-rtdb.europe-west1.firebasedatabase.app",
     projectId: "capitulaciones-b377a",
-    appId: "1:1057770341975:web:9320daeca26839753a4512"
+    storageBucket: "capitulaciones-b377a.firebasestorage.app",
+    messagingSenderId: "1057770341975",
+    appId: "1:1057770341975:web:9320daeca26839753a4512",
+    measurementId: "G-NW8Z9NHYE8"
   };
   localStorage.setItem('cap_firebase', JSON.stringify(cfg));
   localStorage.setItem('localOnly', '');
@@ -1613,9 +1613,10 @@ function saveImport() {
 
   saveState();
 
-  // Firebase save if configured — key must not contain '/' or '.'
+  // Firebase save — clave sin '/' ni '.' para que Realtime Database no falle
   if (state.useFirebase && window._saveDoc) {
-    const fbKey = (state.anyo + '_T' + state.trimestre + '_' + cursoId).replace(/\//g,'-').replace(/\./g,'_');
+    const fbKey = (state.anyo + '_T' + state.trimestre + '_' + cursoId)
+      .replace(/\//g, '-').replace(/\./g, '_');
     window._saveDoc('evaluaciones', fbKey,
       { tipo, mats, alumnos, stats, anyo: state.anyo, trimestre: state.trimestre, cursoId, updatedAt }
     ).then(() => toast('☁️ Guardado en Firebase'))
