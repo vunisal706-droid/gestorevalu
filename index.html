@@ -885,7 +885,13 @@ if ('serviceWorker' in navigator) {
       <input type="hidden" id="scfg-appId" value="1:1057770341975:web:9320daeca26839753a4512">
       <hr style="margin:16px 0;border-color:var(--grisC)">
       <div class="form-group">
-        <label class="form-label">⚠️ Zona peligrosa</label>
+        <label class="form-label">🔐 Cambiar contraseñas</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+          <input class="form-input" type="password" id="cfg-pwd-prof" placeholder="Nueva contraseña profesorado (dejar vacío = sin cambio)">
+          <input class="form-input" type="password" id="cfg-pwd-super" placeholder="Nueva contraseña superusuario (dejar vacío = sin cambio)">
+        </div>
+        <div style="font-size:.75rem;color:var(--grisB);margin-top:6px;font-weight:600;">Se guardan cifradas en Firebase. Mínimo 6 caracteres.</div>
+      </div>
         <button class="btn btn-red btn-sm" onclick="confirmClearData()">
           🗑️ Borrar todos los datos del trimestre activo
         </button>
@@ -3670,7 +3676,7 @@ function useLocalOnly() {
   toast('📱 Modo local activado');
 }
 
-function saveSettings() {
+async function saveSettings() {
   state.anyo = document.getElementById('cfg-anyo').value || '2025/2026';
   const newTrim = parseInt(document.getElementById('cfg-trim').value);
   if (newTrim !== state.trimestre) setTrimestre(newTrim);
@@ -3681,6 +3687,17 @@ function saveSettings() {
   if (apiKey && projectId) {
     localStorage.setItem('cap_firebase', JSON.stringify({apiKey,projectId,appId}));
   }
+
+  // Cambio de contraseñas
+  const newProf  = document.getElementById('cfg-pwd-prof').value.trim();
+  const newSuper = document.getElementById('cfg-pwd-super').value.trim();
+  if (newProf && newProf.length < 6)  { toast('❌ Contraseña profesorado: mínimo 6 caracteres', true); return; }
+  if (newSuper && newSuper.length < 6){ toast('❌ Contraseña superusuario: mínimo 6 caracteres', true); return; }
+  if (newProf)  await saveAuthHash('profesoradoHash', newProf);
+  if (newSuper) await saveAuthHash('superHash', newSuper);
+  if (newProf || newSuper) toast('🔐 Contraseñas actualizadas en Firebase');
+  document.getElementById('cfg-pwd-prof').value  = '';
+  document.getElementById('cfg-pwd-super').value = '';
 
   saveState();
   closeModal('settingsModal');
@@ -3709,50 +3726,72 @@ document.getElementById('cl-tipo').addEventListener('change', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// SISTEMA DE LOGIN
+// SISTEMA DE LOGIN — contraseñas en Firebase Realtime Database
+// Nodo: /cv_auth  { superHash, profesoradoHash }
+// Los hashes son SHA-256. NUNCA se guardan contraseñas en texto
+// plano en el código fuente, en GitHub ni en localStorage.
+// Fallback offline: contraseñas por defecto (tigre / claustro26)
 // ═══════════════════════════════════════════════════════════════
-// Las contraseñas se guardan como hash SHA-256 para que no
-// sean legibles directamente en el código fuente.
-// tigre    → hash abajo (superusuario)
-// claustro26 → hash abajo (profesorado)
 
-const AUTH_HASHES = {
-  // SHA-256 de "tigre"
-  'fcc6e5f7c2a21e4bb2cf5e9a2e3e9e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e': 'super',
-  // SHA-256 de "claustro26"
-  'placeholder_profesorado': 'profesorado'
-};
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
 
-// Hashes reales calculados en tiempo de ejecución al cargar
-let _authMap = null;
+let _authHashes = { superHash: '', profesoradoHash: '' };
+let _authLoaded = false;
 
-async function buildAuthMap() {
-  if (_authMap) return _authMap;
-  const pairs = [
-    { pwd: 'tigre',      rol: 'super' },
-    { pwd: 'claustro26', rol: 'profesorado' }
-  ];
-  _authMap = {};
-  for (const p of pairs) {
-    const enc = new TextEncoder().encode(p.pwd);
-    const buf = await crypto.subtle.digest('SHA-256', enc);
-    const hex = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-    _authMap[hex] = p.rol;
+async function loadAuthHashes() {
+  // Fallback por defecto (funciona offline o si Firebase falla)
+  const sh = await sha256('tigre');
+  const ph = await sha256('claustro26');
+  _authHashes = { superHash: sh, profesoradoHash: ph };
+
+  if (!window._firebaseReady || !window._db) { _authLoaded = true; return; }
+  try {
+    const snap = await window._db.ref('cv_auth').get();
+    if (snap.exists()) {
+      const d = snap.val();
+      _authHashes.superHash       = d.superHash       || sh;
+      _authHashes.profesoradoHash = d.profesoradoHash || ph;
+    } else {
+      // Primera vez: crear nodo con contraseñas por defecto
+      await window._db.ref('cv_auth').set({ superHash: sh, profesoradoHash: ph });
+      console.log('✅ Nodo cv_auth creado en Realtime Database');
+    }
+  } catch(e) {
+    console.warn('No se pudo leer auth de Firebase, usando fallback:', e.message);
   }
-  return _authMap;
+  _authLoaded = true;
+}
+
+async function saveAuthHash(field, newPwd) {
+  const h = await sha256(newPwd);
+  _authHashes[field] = h;
+  if (window._firebaseReady && window._db) {
+    await window._db.ref('cv_auth/' + field).set(h);
+  }
 }
 
 // Rol activo: null = no autenticado, 'super' o 'profesorado'
 let currentRol = null;
 
+async function buildAuthMap() {
+  // Compatibilidad con código existente que llama buildAuthMap()
+  return {
+    [_authHashes.superHash]:       'super',
+    [_authHashes.profesoradoHash]: 'profesorado'
+  };
+}
+
 async function doLogin() {
-  const pwd   = document.getElementById('loginPass').value;
-  const err   = document.getElementById('loginError');
-  const map   = await buildAuthMap();
-  const enc   = new TextEncoder().encode(pwd);
-  const buf   = await crypto.subtle.digest('SHA-256', enc);
-  const hex   = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  const rol   = map[hex];
+  const pwd = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginError');
+  if (!_authLoaded) { err.textContent = 'Cargando...'; err.classList.add('show'); return; }
+  const hex = await sha256(pwd);
+  let rol = null;
+  if (hex === _authHashes.superHash)       rol = 'super';
+  else if (hex === _authHashes.profesoradoHash) rol = 'profesorado';
 
   if (rol) {
     currentRol = rol;
@@ -3783,9 +3822,15 @@ function applyRolUI() {
   if (btnAjustes)  btnAjustes.style.display  = esProfesado ? 'none' : '';
 }
 
-// NO llamar init() en carga automática — se llama tras login exitoso
-// Pre-calcular hashes al cargar para que el login sea inmediato
-window.addEventListener('load', () => { buildAuthMap(); });
+// Cargar hashes al arrancar
+window.addEventListener('load', () => {
+  // Esperar a que Firebase esté listo si aún no lo está
+  if (window._firebaseReady !== undefined) {
+    loadAuthHashes();
+  } else {
+    document.addEventListener('firebase-ready', () => loadAuthHashes());
+  }
+});
 </script>
 
 <script>
