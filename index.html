@@ -3116,79 +3116,504 @@ function renderCompMateria(id, t1, t2, t3, grades, mats, cfg) {
   const trimLabels = ['1T','2T','3T'].filter((_,i)=>trims[i]);
   const data = trims.filter(Boolean);
 
-  // Colores distintivos por trimestre
-  const TRIM_COLORS = {
-    '1T': { bg:'#1A237E', light:'#E8EAF6', text:'#1A237E' }, // azul oscuro
-    '2T': { bg:'#1B5E20', light:'#E8F5E9', text:'#1B5E20' }, // verde oscuro
-    '3T': { bg:'#B71C1C', light:'#FFEBEE', text:'#B71C1C' }, // rojo oscuro
+  const TC = {
+    '1T':{bg:'#1A237E',light:'#E8EAF6',text:'#1A237E',mid:'rgba(26,35,126,.75)'},
+    '2T':{bg:'#1B5E20',light:'#E8F5E9',text:'#1B5E20',mid:'rgba(27,94,32,.75)'},
+    '3T':{bg:'#B71C1C',light:'#FFEBEE',text:'#B71C1C',mid:'rgba(183,28,28,.75)'},
   };
+  const GBG={SB:'#BBDEFB',NT:'#C8E6C9',BI:'#FFF8E1',SU:'#FBE9E7',IN:'#FFEBEE',EXC:'#BBDEFB',BUE:'#C8E6C9',ADE:'#FFF8E1',NAD:'#FFEBEE'};
+  const GCOL={SB:'#1565C0',NT:'#2E7D32',BI:'#F57F17',SU:'#E65100',IN:'#C62828',EXC:'#1565C0',BUE:'#2E7D32',ADE:'#F57F17',NAD:'#C62828'};
 
-  // Cabecera: una celda por trimestre que agrupa las columnas de calificaciones
-  let headerRow1 = `<tr><th rowspan="2" style="vertical-align:middle">Materia</th>`;
-  let headerRow2 = `<tr>`;
-  data.forEach((t, i) => {
-    const lbl = trimLabels[i];
-    const col = TRIM_COLORS[lbl] || TRIM_COLORS['1T'];
-    headerRow1 += `<th colspan="${grades.length}" style="background:${col.bg};color:#fff;text-align:center;font-weight:800;letter-spacing:.5px;border-bottom:2px solid #fff">${lbl}</th>`;
-    grades.forEach(g => {
-      headerRow2 += `<th style="background:${col.light};color:${col.text};font-size:10px;font-weight:700">${g}</th>`;
-    });
+  function matPct(t, mat) {
+    if (!t) return 0;
+    const ms = t.stats.matStats[mat]||{};
+    const tot = Object.values(ms).reduce((a,b)=>a+b,0);
+    const pos = (t.stats.posGrades||[]).reduce((a,g)=>a+(ms[g]||0),0);
+    return tot ? Math.round(pos/tot*100) : 0;
+  }
+
+  const matPcts = {};
+  mats.forEach(mat => { matPcts[mat] = data.map(t => matPct(t, mat)); });
+  const lastT = data[data.length-1];
+
+  const cGrp = 'cm-grouped', cRad = 'cm-radar', cBarH = 'cm-barh', cStacked = 'cm-stacked';
+  const miniIds = mats.map((_,i) => `cm-mini-${i}`);
+
+  // KPI strip
+  const kpiHtml = mats.map(mat => {
+    const p = matPct(lastT, mat);
+    const clr = p>=80?'#2E7D32':p>=60?'#F57F17':'#C62828';
+    return `<div class="kpi" style="border-top-color:${clr};min-width:90px;padding:12px 8px">
+      <div class="kpi-val" style="color:${clr};font-size:20px">${p}%</div>
+      <div class="kpi-lbl" style="font-size:9px;line-height:1.2">${mat}</div>
+      <div class="kpi-sub">${trimLabels[trimLabels.length-1]}</div>
+    </div>`;
+  }).join('');
+
+  // Mini sparklines
+  const miniHtml = mats.map((mat, mi) => {
+    const pcts = matPcts[mat];
+    const diff = pcts[pcts.length-1]-pcts[0];
+    const icon = diff>0?`<span style="color:#2E7D32;font-weight:800">▲+${diff}%</span>`:diff<0?`<span style="color:#C62828;font-weight:800">▼${diff}%</span>`:`<span style="color:#90A4AE">→ Sin cambio</span>`;
+    const lastP = pcts[pcts.length-1];
+    const clr = lastP>=80?'#2E7D32':lastP>=60?'#F57F17':'#C62828';
+    return `<div class="chart-card" style="flex:1;min-width:170px;max-width:230px;padding:12px">
+      <div style="font-size:11px;font-weight:800;color:var(--azul);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${mat}</div>
+      <div style="font-size:10px;margin-bottom:4px">Actual: <strong style="color:${clr}">${lastP}%</strong> &nbsp;${icon}</div>
+      <div style="height:80px;position:relative"><canvas id="${miniIds[mi]}"></canvas></div>
+    </div>`;
+  }).join('');
+
+  // Matsorted by improvement
+  const matsOrd = [...mats].sort((a,b)=>{
+    const pa=matPcts[a],pb=matPcts[b];
+    return (pb[pb.length-1]-pb[0])-(pa[pa.length-1]-pa[0]);
   });
-  headerRow1 += `<th rowspan="2" style="vertical-align:middle">% Pos<br>último T</th></tr>`;
-  headerRow2 += `</tr>`;
 
-  let html = `<div class="card"><div class="card-title">📊 Evolución por materia — ${cfg.label}</div>
-    <div class="table-wrap"><table class="evol-table">
-    <thead>${headerRow1}${headerRow2}</thead><tbody>`;
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">🏷️ Resumen — ${cfg.label} · ${trimLabels[trimLabels.length-1]}</div>
+      <div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(90px,1fr))">${kpiHtml}</div>
+    </div>
 
-  mats.forEach(mat => {
-    html += `<tr><td><strong>${mat}</strong></td>`;
-    data.forEach((t, i) => {
-      const lbl = trimLabels[i];
-      const col = TRIM_COLORS[lbl] || TRIM_COLORS['1T'];
-      grades.forEach(g => {
-        const v = t.stats.matStats[mat]?.[g]||0;
-        html += v
-          ? `<td style="background:${col.light}""><span class="pill g-${g}">${v}</span></td>`
-          : `<td style="background:${col.light}">—</td>`;
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">📊 % Positivos por materia y trimestre</div>
+        <div style="height:280px;position:relative"><canvas id="${cGrp}"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">🕸️ Radar comparativo de materias</div>
+        <div style="height:280px;position:relative"><canvas id="${cRad}"></canvas></div>
+      </div>
+    </div>
+
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">📈 Ranking de mejora (${trimLabels[0]} → ${trimLabels[trimLabels.length-1]})</div>
+        <div style="height:${Math.max(180,mats.length*38)}px;position:relative"><canvas id="${cBarH}"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">📦 Distribución de calificaciones por materia (${trimLabels[trimLabels.length-1]})</div>
+        <div style="height:${Math.max(180,mats.length*38)}px;position:relative"><canvas id="${cStacked}"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">🔎 Evolución detallada por materia</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${miniHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 Tabla completa · calificaciones por materia y trimestre</div>
+      <div class="table-wrap" id="cm-table"></div>
+    </div>`;
+
+  Object.keys(_charts).filter(k=>k.startsWith('cm-')).forEach(k=>{_charts[k]?.destroy();delete _charts[k];});
+
+  setTimeout(() => {
+    // 1. Grouped bar % pos
+    const el1 = document.getElementById(cGrp);
+    if (el1) _charts[cGrp] = new Chart(el1, {
+      type:'bar',
+      data:{
+        labels: mats,
+        datasets: trimLabels.map((lbl,i)=>({
+          label:lbl, data:mats.map(m=>matPcts[m][i]),
+          backgroundColor:TC[lbl]?.mid||'#666',
+          borderColor:TC[lbl]?.bg||'#666', borderWidth:2, borderRadius:5
+        }))
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'top'},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.y}%`}}},
+        scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'rgba(0,0,0,.05)'}},x:{ticks:{font:{size:10}}}}
+      }
+    });
+
+    // 2. Radar
+    const el2 = document.getElementById(cRad);
+    if (el2) _charts[cRad] = new Chart(el2, {
+      type:'radar',
+      data:{
+        labels: mats,
+        datasets: trimLabels.map((lbl,i)=>({
+          label:lbl, data:mats.map(m=>matPcts[m][i]),
+          borderColor:TC[lbl]?.bg, backgroundColor:(TC[lbl]?.mid||'rgba(0,0,0,.1)').replace('.75','.18'),
+          pointBackgroundColor:TC[lbl]?.bg, pointRadius:4, borderWidth:2.5
+        }))
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'bottom',labels:{font:{size:11}}}},
+        scales:{r:{min:0,max:100,ticks:{stepSize:25,font:{size:9},backdropColor:'transparent'},
+          pointLabels:{font:{size:mats.length>6?8:10}},grid:{color:'rgba(0,0,0,.08)'}}}
+      }
+    });
+
+    // 3. Ranking horizontal (mejora)
+    const el3 = document.getElementById(cBarH);
+    if (el3) {
+      const diffs = matsOrd.map(m=>{const p=matPcts[m];return p[p.length-1]-p[0];});
+      _charts[cBarH] = new Chart(el3, {
+        type:'bar',
+        data:{
+          labels:matsOrd,
+          datasets:[{
+            label:'Variación % positivos',
+            data:diffs,
+            backgroundColor:diffs.map(d=>d>5?'rgba(46,125,50,.8)':d<-5?'rgba(198,40,40,.8)':'rgba(144,164,174,.8)'),
+            borderColor:diffs.map(d=>d>5?'#1B5E20':d<-5?'#B71C1C':'#607D8B'),
+            borderWidth:2, borderRadius:4
+          }]
+        },
+        options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const v=c.parsed.x;return `${v>0?'+':''}${v} puntos porcentuales`;}}},
+            annotation:{annotations:{line0:{type:'line',xMin:0,xMax:0,borderColor:'rgba(0,0,0,.3)',borderWidth:1}}}},
+          scales:{x:{ticks:{callback:v=>`${v>0?'+':''}${v}%`},grid:{color:'rgba(0,0,0,.05)'}},y:{ticks:{font:{size:11}}}}
+        }
+      });
+    }
+
+    // 4. Stacked distribution last T
+    const el4 = document.getElementById(cStacked);
+    if (el4) {
+      const gradeColors = {SB:'#1565C0',NT:'#43A047',BI:'#FDD835',SU:'#E65100',IN:'#C62828',EXC:'#1565C0',BUE:'#43A047',ADE:'#FDD835',NAD:'#C62828'};
+      _charts[cStacked] = new Chart(el4, {
+        type:'bar',
+        data:{
+          labels:mats,
+          datasets: grades.map(g=>({
+            label:g, data:mats.map(m=>lastT.stats.matStats[m]?.[g]||0),
+            backgroundColor:gradeColors[g]||'#ccc', borderWidth:1, borderColor:'#fff', borderRadius:2
+          }))
+        },
+        options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{position:'top',labels:{font:{size:10}}}},
+          scales:{x:{stacked:true,ticks:{stepSize:1},grid:{color:'rgba(0,0,0,.04)'}},y:{stacked:true,ticks:{font:{size:10}}}}
+        }
+      });
+    }
+
+    // 5. Mini sparklines
+    mats.forEach((mat,mi) => {
+      const el = document.getElementById(miniIds[mi]);
+      if (!el) return;
+      const pcts = matPcts[mat];
+      const colPts = trimLabels.map(l=>TC[l]?.bg||'#1565C0');
+      _charts[miniIds[mi]] = new Chart(el, {
+        type:'line',
+        data:{labels:trimLabels,datasets:[{
+          data:pcts,borderColor:'#1565C0',backgroundColor:'rgba(21,101,192,.1)',
+          fill:true,tension:.35,pointRadius:6,pointBackgroundColor:colPts,
+          pointBorderColor:'#fff',pointBorderWidth:2,borderWidth:2.5
+        }]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.parsed.y}%`}}},
+          scales:{y:{min:0,max:100,display:true,ticks:{font:{size:8},callback:v=>v+'%'}},x:{ticks:{font:{size:8}}}}
+        }
       });
     });
-    const lastT = data[data.length-1];
-    const ms = lastT.stats.matStats[mat]||{};
-    const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
-    const matPos = grades.filter(g=>lastT.stats.posGrades.includes(g)).reduce((a,g)=>a+(ms[g]||0),0);
-    const pct = matTotal ? Math.round(matPos/matTotal*100) : 0;
-    html += `<td style="font-weight:700;color:${pct>=80?'var(--verdeM)':'var(--rojo)'}">${pct}%</td></tr>`;
-  });
-  html += `</tbody></table></div></div>`;
-  content.innerHTML = html;
+
+    // 6. Enhanced table
+    const TRIM_COLORS = {
+      '1T':{bg:'#1A237E',light:'#E8EAF6'},
+      '2T':{bg:'#1B5E20',light:'#E8F5E9'},
+      '3T':{bg:'#B71C1C',light:'#FFEBEE'},
+    };
+    let h1=`<tr><th rowspan="2" style="vertical-align:middle">Materia</th>`;
+    let h2=`<tr>`;
+    data.forEach((t,i)=>{
+      const lbl=trimLabels[i], col=TRIM_COLORS[lbl];
+      h1+=`<th colspan="${grades.length+1}" style="background:${col.bg};color:#fff;text-align:center;font-weight:800;border-bottom:2px solid #fff">${lbl}</th>`;
+      grades.forEach(g=>{h2+=`<th style="background:${col.light};color:${col.bg};font-size:10px;font-weight:700">${g}</th>`;});
+      h2+=`<th style="background:${col.light};color:${col.bg};font-size:10px;font-weight:700">%✅</th>`;
+    });
+    h1+=`<th rowspan="2" style="vertical-align:middle;font-size:10px">Tendencia</th></tr>`;
+    h2+=`</tr>`;
+    let tbl=`<table class="evol-table"><thead>${h1}${h2}</thead><tbody>`;
+    mats.forEach(mat=>{
+      tbl+=`<tr><td><strong>${mat}</strong></td>`;
+      data.forEach((t,i)=>{
+        const lbl=trimLabels[i],col=TRIM_COLORS[lbl];
+        grades.forEach(g=>{
+          const v=t.stats.matStats[mat]?.[g]||0;
+          tbl+=v?`<td style="background:${col.light}"><span class="pill g-${g}">${v}</span></td>`:`<td style="background:${col.light}">—</td>`;
+        });
+        const p=matPct(t,mat);
+        tbl+=`<td style="background:${col.light};font-weight:700;color:${p>=80?'var(--verdeM)':p>=60?'var(--ambar)':'var(--rojo)'}">${p}%</td>`;
+      });
+      const pArr=matPcts[mat],diff=pArr[pArr.length-1]-pArr[0];
+      tbl+=`<td style="font-weight:800;color:${diff>0?'var(--verdeM)':diff<0?'var(--rojo)':'var(--gris)'}">
+        ${diff>0?'▲ +'+diff+'%':diff<0?'▼ '+diff+'%':'→ Sin cambio'}</td></tr>`;
+    });
+    tbl+=`</tbody></table>`;
+    document.getElementById('cm-table').innerHTML = tbl;
+  }, 50);
 }
 
 function renderCompAlumno(id, t1, t2, t3, grades, mats, cfg) {
   const content = document.getElementById('comp-content');
-  const trims = [t1,t2,t3].filter(Boolean);
-  const trimLabels = ['1T','2T','3T'].filter((_,i) => [t1,t2,t3][i]);
-  const maxAlumnos = Math.max(...trims.map(t=>t.alumnos.length));
+  const trims = [t1,t2,t3];
+  const trimLabels = ['1T','2T','3T'].filter((_,i) => trims[i]);
+  const data = trims.filter(Boolean);
+  const posGrades = data[0]?.stats?.posGrades || [];
 
-  let html = `<div class="card"><div class="card-title">👨‍🎓 Evolución por alumno — ${cfg.label}</div>
-    <div class="table-wrap"><table class="evol-table">
-    <thead><tr><th>Nº</th>` +
-    mats.map(m => trimLabels.map(l=>`<th>${m}<br><small>${l}</small></th>`).join('')).join('') +
-    `</tr></thead><tbody>`;
+  const TC = {
+    '1T':{bg:'#1A237E',light:'#E8EAF6',mid:'rgba(26,35,126,.8)'},
+    '2T':{bg:'#1B5E20',light:'#E8F5E9',mid:'rgba(27,94,32,.8)'},
+    '3T':{bg:'#B71C1C',light:'#FFEBEE',mid:'rgba(183,28,28,.8)'},
+  };
+  const GBG={SB:'#BBDEFB',NT:'#C8E6C9',BI:'#FFFDE7',SU:'#FBE9E7',IN:'#FFEBEE',EXC:'#BBDEFB',BUE:'#C8E6C9',ADE:'#FFFDE7',NAD:'#FFEBEE'};
+  const GCOL={SB:'#1565C0',NT:'#2E7D32',BI:'#F57F17',SU:'#E65100',IN:'#C62828',EXC:'#1565C0',BUE:'#2E7D32',ADE:'#F57F17',NAD:'#C62828'};
 
-  for (let i = 0; i < maxAlumnos; i++) {
-    html += `<tr><td>${i+1}</td>`;
-    mats.forEach(mat => {
-      trims.forEach(t => {
-        const a = t.alumnos[i];
-        const v = a ? (a.notas[mat]||'') : '';
-        html += v ? `<td><span class="pill g-${v}">${v}</span></td>` : '<td>—</td>';
-      });
+  function gNum(g){return {SB:5,NT:4,BI:3,SU:2,IN:1,EXC:4,BUE:3,ADE:2,NAD:1}[g]||0;}
+
+  const maxAlumnos = Math.max(...data.map(t=>t.alumnos.length));
+
+  const alumnos = [];
+  for (let i=0;i<maxAlumnos;i++) {
+    const byTrim = data.map(t=>{
+      const a=t.alumnos[i];
+      if (!a) return null;
+      const total=mats.filter(m=>a.notas[m]).length;
+      const pos=mats.filter(m=>posGrades.includes(a.notas[m])).length;
+      return {notas:a.notas, pct:total?Math.round(pos/total*100):0};
     });
-    html += `</tr>`;
+    const validPcts = byTrim.filter(Boolean).map(x=>x.pct);
+    const diff = validPcts.length>=2 ? validPcts[validPcts.length-1]-validPcts[0] : 0;
+    alumnos.push({idx:i+1, byTrim, diff,
+      tendencia: diff>5?'mejora':diff<-5?'empeora':'estable'});
   }
-  html += `</tbody></table></div></div>`;
-  content.innerHTML = html;
+
+  const mejoran  = alumnos.filter(a=>a.tendencia==='mejora').length;
+  const empeoran = alumnos.filter(a=>a.tendencia==='empeora').length;
+  const estables = alumnos.filter(a=>a.tendencia==='estable').length;
+  const lastT    = data[data.length-1];
+  const lastPcts = alumnos.map(a=>a.byTrim.filter(Boolean).pop()?.pct??0);
+  const avgLast  = lastPcts.length?Math.round(lastPcts.reduce((a,b)=>a+b,0)/lastPcts.length):0;
+  const enRiesgo = alumnos.filter(a=>(a.byTrim.filter(Boolean).pop()?.pct??100)<50).length;
+
+  // Per-materia tendency
+  const matTend = mats.map(mat=>{
+    let mej=0,emp=0,est=0;
+    if (data.length<2) return {mat,mej,emp,est};
+    for (let i=0;i<maxAlumnos;i++) {
+      const a1=data[0].alumnos[i], aL=data[data.length-1].alumnos[i];
+      if (!a1||!aL) continue;
+      const g1=gNum(a1.notas[mat]||''), gL=gNum(aL.notas[mat]||'');
+      if (!g1||!gL) continue;
+      if (gL>g1) mej++; else if (gL<g1) emp++; else est++;
+    }
+    return {mat,mej,emp,est};
+  });
+
+  // Heat map HTML
+  let hmHtml=`<table style="width:100%;border-collapse:collapse;font-size:11px">
+    <thead><tr><th style="padding:6px 10px;text-align:left;background:#263238;color:#fff;position:sticky;left:0;min-width:90px">Alumno</th>` +
+    mats.map(m=>`<th style="padding:6px 4px;background:#263238;color:#fff;font-size:10px;text-align:center;white-space:nowrap">${m}</th>`).join('') +
+    `<th style="padding:6px;background:#263238;color:#fff;text-align:center;font-size:10px">%✅</th>
+     <th style="padding:6px;background:#263238;color:#fff;text-align:center;font-size:10px">Tend.</th></tr></thead><tbody>`;
+  alumnos.forEach(al=>{
+    const last=al.byTrim.filter(Boolean).pop()||{notas:{},pct:0};
+    const rowPct=last.pct;
+    const notas=last.notas;
+    const tIcon=al.tendencia==='mejora'?'▲':al.tendencia==='empeora'?'▼':'→';
+    const tClr=al.tendencia==='mejora'?'#2E7D32':al.tendencia==='empeora'?'#C62828':'#90A4AE';
+    hmHtml+=`<tr style="border-bottom:1px solid #EEF2F7">
+      <td style="padding:5px 8px;font-weight:600;background:#fff;position:sticky;left:0">Alumno ${al.idx}</td>` +
+      mats.map(m=>{const g=notas[m]||'';return g
+        ?`<td style="padding:4px 2px;text-align:center;background:${GBG[g]||'#f5f5f5'}"><span style="font-weight:700;color:${GCOL[g]||'#666'};font-size:11px">${g}</span></td>`
+        :`<td style="padding:4px;text-align:center;color:#CBD5E0;font-size:10px">—</td>`;}).join('') +
+      `<td style="padding:4px;text-align:center;font-weight:700;color:${rowPct>=80?'#2E7D32':rowPct>=50?'#F57F17':'#C62828'}">${rowPct}%</td>
+       <td style="padding:4px;text-align:center;font-weight:800;color:${tClr}">${tIcon}</td></tr>`;
+  });
+  hmHtml+=`</tbody></table>`;
+
+  // Alumnos en riesgo list
+  const riesgoList = alumnos.filter(a=>(a.byTrim.filter(Boolean).pop()?.pct??100)<50);
+  const riesgoHtml = riesgoList.length
+    ? riesgoList.map(al=>{
+        const last=al.byTrim.filter(Boolean).pop()||{notas:{}};
+        const malas=mats.filter(m=>!posGrades.includes(last.notas[m])&&last.notas[m]);
+        return `<div style="padding:8px 12px;background:#FFEBEE;border-left:4px solid #C62828;border-radius:6px;margin-bottom:8px;font-size:12px">
+          <strong>Alumno ${al.idx}</strong> — ${al.byTrim.filter(Boolean).pop()?.pct??0}% positivos · Suspensos: ${malas.join(', ')||'—'}
+          <span style="float:right;font-weight:800;color:${al.tendencia==='mejora'?'#2E7D32':al.tendencia==='empeora'?'#C62828':'#90A4AE'}">
+            ${al.tendencia==='mejora'?'▲ Mejorando':al.tendencia==='empeora'?'▼ Empeorar':'→ Estable'}</span></div>`;
+      }).join('')
+    : `<div class="alert alert-ok">🎉 Ningún alumno por debajo del 50% de materias aprobadas.</div>`;
+
+  const cTend='ca-tend', cDist='ca-dist', cEvolH='ca-evolh', cMatTend='ca-mattend', cSpiders='ca-spiders';
+  const cEvol2 = 'ca-evol2';
+
+  content.innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(110px,1fr));margin-bottom:16px">
+      <div class="kpi" style="border-top-color:#2E7D32"><div class="kpi-val" style="color:#2E7D32">${mejoran}</div><div class="kpi-lbl">Alumnos mejoran</div><div class="kpi-sub">${trimLabels[0]}→${trimLabels[trimLabels.length-1]}</div></div>
+      <div class="kpi" style="border-top-color:#C62828"><div class="kpi-val" style="color:#C62828">${empeoran}</div><div class="kpi-lbl">Alumnos empeoran</div></div>
+      <div class="kpi" style="border-top-color:#90A4AE"><div class="kpi-val" style="color:#90A4AE">${estables}</div><div class="kpi-lbl">Estables</div></div>
+      <div class="kpi" style="border-top-color:#1565C0"><div class="kpi-val" style="color:#1565C0">${avgLast}%</div><div class="kpi-lbl">Media % pos</div><div class="kpi-sub">${trimLabels[trimLabels.length-1]}</div></div>
+      <div class="kpi" style="border-top-color:#E65100"><div class="kpi-val" style="color:#E65100">${enRiesgo}</div><div class="kpi-lbl">En riesgo (&lt;50%)</div></div>
+    </div>
+
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">🎯 Tendencia general (${trimLabels[0]}→${trimLabels[trimLabels.length-1]})</div>
+        <div style="height:240px;position:relative"><canvas id="${cTend}"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">📊 Distribución % positivos por alumno (${trimLabels[trimLabels.length-1]})</div>
+        <div style="height:240px;position:relative"><canvas id="${cDist}"></canvas></div>
+      </div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:16px">
+      <div class="card-title">📈 Evolución % positivos — todos los alumnos comparados entre trimestres</div>
+      <div style="height:${Math.max(220,maxAlumnos*26+60)}px;position:relative"><canvas id="${cEvolH}"></canvas></div>
+    </div>
+
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">📋 Alumnos que mejoran / empeoran por materia</div>
+        <div style="height:${Math.max(180,mats.length*40)}px;position:relative"><canvas id="${cMatTend}"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">📉 Porcentaje de positivos por materia — último trimestre</div>
+        <div style="height:${Math.max(180,mats.length*40)}px;position:relative"><canvas id="${cEvol2}"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">⚠️ Alumnos en riesgo (${trimLabels[trimLabels.length-1]} &lt;50% positivos)</div>
+      ${riesgoHtml}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">🌡️ Mapa de calor — ${trimLabels[trimLabels.length-1]}</div>
+      <div class="table-wrap">${hmHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 Tabla completa por alumno, materia y trimestre</div>
+      <div class="table-wrap" id="ca-table"></div>
+    </div>`;
+
+  Object.keys(_charts).filter(k=>k.startsWith('ca-')).forEach(k=>{_charts[k]?.destroy();delete _charts[k];});
+
+  setTimeout(() => {
+    // 1. Tendencia donut
+    const el1=document.getElementById(cTend);
+    if (el1) _charts[cTend]=new Chart(el1,{
+      type:'doughnut',
+      data:{labels:['▲ Mejoran','→ Estables','▼ Empeoran'],datasets:[{
+        data:[mejoran,estables,empeoran],
+        backgroundColor:['#2E7D32','#90A4AE','#C62828'],borderWidth:3,borderColor:'#fff'
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'58%',
+        plugins:{legend:{position:'bottom',labels:{font:{size:12},padding:12}},
+          tooltip:{callbacks:{label:c=>`${c.label}: ${c.parsed} alumnos`}}}
+      }
+    });
+
+    // 2. Dist % pos (bar, sorted descending)
+    const el2=document.getElementById(cDist);
+    if (el2) {
+      const sorted=[...alumnos].sort((a,b)=>(b.byTrim.filter(Boolean).pop()?.pct||0)-(a.byTrim.filter(Boolean).pop()?.pct||0));
+      const sortPcts=sorted.map(a=>a.byTrim.filter(Boolean).pop()?.pct||0);
+      _charts[cDist]=new Chart(el2,{
+        type:'bar',
+        data:{labels:sorted.map(a=>`A${a.idx}`),datasets:[{
+          label:'% Positivos',data:sortPcts,
+          backgroundColor:sortPcts.map(p=>p>=80?'rgba(46,125,50,.8)':p>=60?'rgba(245,127,23,.8)':p>=40?'rgba(230,81,0,.8)':'rgba(198,40,40,.8)'),
+          borderRadius:4,borderWidth:1,borderColor:'#fff'
+        }]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Alumno ${sorted[c.dataIndex].idx}: ${c.parsed.y}%`}}},
+          scales:{
+            y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'rgba(0,0,0,.05)'},
+              title:{display:true,text:'% Positivos',font:{size:10}}},
+            x:{ticks:{font:{size:9}}}
+          }
+        }
+      });
+    }
+
+    // 3. Evolución horizontal grouped bars
+    const el3=document.getElementById(cEvolH);
+    if (el3) {
+      const trimBg=trimLabels.map(l=>TC[l]?.mid||'#666');
+      _charts[cEvolH]=new Chart(el3,{
+        type:'bar',
+        data:{labels:alumnos.map(a=>`A${a.idx}`),datasets:trimLabels.map((lbl,ti)=>({
+          label:lbl,data:alumnos.map(a=>a.byTrim[ti]?.pct??null),
+          backgroundColor:TC[lbl]?.mid||'#666',borderColor:TC[lbl]?.bg||'#666',borderWidth:1,borderRadius:3
+        }))},
+        options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{position:'top'},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.x}%`}}},
+          scales:{
+            x:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'rgba(0,0,0,.05)'}},
+            y:{ticks:{font:{size:10}}}
+          }
+        }
+      });
+    }
+
+    // 4. Por materia: stacked alumnos mejoran/estable/empeoran
+    const el4=document.getElementById(cMatTend);
+    if (el4) _charts[cMatTend]=new Chart(el4,{
+      type:'bar',
+      data:{labels:mats,datasets:[
+        {label:'▲ Mejoran',data:matTend.map(x=>x.mej),backgroundColor:'rgba(46,125,50,.8)',borderRadius:3},
+        {label:'→ Estables',data:matTend.map(x=>x.est),backgroundColor:'rgba(144,164,174,.8)',borderRadius:3},
+        {label:'▼ Empeoran',data:matTend.map(x=>x.emp),backgroundColor:'rgba(198,40,40,.8)',borderRadius:3},
+      ]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'top',labels:{font:{size:11}}}},
+        scales:{x:{stacked:true,ticks:{stepSize:1},grid:{color:'rgba(0,0,0,.04)'}},y:{stacked:true,ticks:{font:{size:10}}}}
+      }
+    });
+
+    // 5. % pos por materia (último trimestre) horizontal bar
+    const el5=document.getElementById(cEvol2);
+    if (el5) {
+      const matPctsLast=mats.map(mat=>{
+        const ms=lastT.stats.matStats[mat]||{};
+        const tot=Object.values(ms).reduce((a,b)=>a+b,0);
+        const pos=posGrades.reduce((a,g)=>a+(ms[g]||0),0);
+        return tot?Math.round(pos/tot*100):0;
+      });
+      const matOrdIdx=[...mats.keys()].sort((a,b)=>matPctsLast[b]-matPctsLast[a]);
+      _charts[cEvol2]=new Chart(el5,{
+        type:'bar',
+        data:{labels:matOrdIdx.map(i=>mats[i]),datasets:[{
+          label:`% Positivos ${trimLabels[trimLabels.length-1]}`,
+          data:matOrdIdx.map(i=>matPctsLast[i]),
+          backgroundColor:matOrdIdx.map(i=>matPctsLast[i]>=80?'rgba(46,125,50,.8)':matPctsLast[i]>=60?'rgba(245,127,23,.8)':'rgba(198,40,40,.8)'),
+          borderRadius:4,borderWidth:1,borderColor:'#fff'
+        }]},
+        options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.parsed.x}%`}}},
+          scales:{x:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'rgba(0,0,0,.05)'}},y:{ticks:{font:{size:10}}}}
+        }
+      });
+    }
+
+    // 6. Traditional table
+    let tbl=`<table class="evol-table"><thead><tr>
+      <th style="min-width:70px">Alumno</th>` +
+      mats.map(m=>trimLabels.map(l=>`<th style="font-size:10px;white-space:nowrap;background:${TC[l]?.light||'#eee'};color:${TC[l]?.bg||'#333'}">${m}<br><small>${l}</small></th>`).join('')).join('') +
+      `<th>Tend.</th></tr></thead><tbody>`;
+    alumnos.forEach(al=>{
+      const tIcon=al.tendencia==='mejora'?'▲ Sube':al.tendencia==='empeora'?'▼ Baja':'→ Igual';
+      const tClr=al.tendencia==='mejora'?'var(--verdeM)':al.tendencia==='empeora'?'var(--rojo)':'var(--gris)';
+      tbl+=`<tr><td style="font-weight:600">Alumno ${al.idx}</td>`;
+      mats.forEach(mat=>{
+        al.byTrim.forEach((entry,ti)=>{
+          const v=entry?.notas?.[mat]||'';
+          tbl+=v?`<td style="background:${TC[trimLabels[ti]]?.light||'#fff'}"><span class="pill g-${v}">${v}</span></td>`:`<td style="color:#CBD5E0">—</td>`;
+        });
+      });
+      tbl+=`<td style="font-weight:800;color:${tClr};white-space:nowrap">${tIcon}</td></tr>`;
+    });
+    tbl+=`</tbody></table>`;
+    document.getElementById('ca-table').innerHTML=tbl;
+  },50);
 }
 
 // ═══════════════════════════════════════════════════════════════
