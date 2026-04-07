@@ -127,9 +127,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:#263238;min-hei
   line-height:1.1}
 .topbar-title p{font-size:11px;opacity:.75;margin-top:2px}
 .topbar-actions{display:flex;gap:8px;align-items:center}
-.trim-badge{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;
-  cursor:pointer;border:2px solid rgba(255,255,255,.4);color:#fff;
-  background:rgba(255,255,255,.15);transition:all .2s}
+.trim-badge{padding:8px 16px;border-radius:24px;font-size:13px;font-weight:700;
+  cursor:pointer;border:2px solid rgba(255,255,255,.5);color:#fff;
+  background:rgba(255,255,255,.2);transition:all .2s;white-space:nowrap}
 .trim-badge.active{background:#fff;color:var(--azul)}
 .btn-icon{background:rgba(255,255,255,.15);border:none;color:#fff;
   width:36px;height:36px;border-radius:8px;font-size:18px;cursor:pointer;
@@ -515,9 +515,9 @@ if ('serviceWorker' in navigator) {
         <div class="db-dot grey" id="dbDot"></div>
         <span id="dbLabel">DB...</span>
       </div>
-      <span class="trim-badge" id="tb1" onclick="setTrimestre(1)">1T</span>
-      <span class="trim-badge" id="tb2" onclick="setTrimestre(2)">2T</span>
-      <span class="trim-badge" id="tb3" onclick="setTrimestre(3)">3T</span>
+      <span class="trim-badge" id="tb1" onclick="setTrimestre(1)">Primer trimestre</span>
+      <span class="trim-badge" id="tb2" onclick="setTrimestre(2)">Segundo trimestre</span>
+      <span class="trim-badge" id="tb3" onclick="setTrimestre(3)">Tercer trimestre</span>
       <button class="btn-icon" id="pwaInstallBtn" onclick="installPWA()" title="Instalar app" style="display:none">📲</button>
       <button class="btn-icon" onclick="showModal('settingsModal')" title="Ajustes" id="btnAjustes">⚙️</button>
       <button id="logoutBtn" onclick="doLogout()" title="Cerrar sesión">🔒 Salir</button>
@@ -570,6 +570,36 @@ if ('serviceWorker' in navigator) {
       <div class="kpi-lbl">% Positivos</div></div>
     <div class="kpi ins"><div class="kpi-val" id="kpi-neg">—</div>
       <div class="kpi-lbl">% Negativos</div></div>
+  </div>
+
+
+  <!-- NUEVAS GRÁFICAS DEL CENTRO -->
+  <div class="card" id="inicio-charts-card" style="display:none">
+    <div class="card-title">📊 Análisis del Centro</div>
+
+    <!-- Gráficas por etapas -->
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="card-title">📚 Resultados por Etapa Educativa</div>
+        <div class="chart-wrap"><canvas id="chart-etapas"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">⚠️ Asignaturas con más dificultad en el centro</div>
+        <div class="chart-wrap"><canvas id="chart-dificultad"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Distribución de suspensos por alumno -->
+    <div class="card" style="margin-top:16px;border-left:4px solid var(--azulM)">
+      <div class="card-title">🎓 Distribución de alumnos por número de suspensas</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px" id="suspensas-kpis">
+        <!-- KPIs dinámicos -->
+      </div>
+      <div class="chart-wrap" style="height:220px"><canvas id="chart-suspensas"></canvas></div>
+      <p style="font-size:11px;color:var(--gris);margin-top:8px">
+        <strong>Nota:</strong> En Primaria "IN" = Suspenso | En Infantil "NAD" = No Adquirido
+      </p>
+    </div>
   </div>
 
   <div class="card">
@@ -1228,7 +1258,7 @@ function setTrimestre(t) {
   populateInformeSelects();
   populateComparativaSelects();
   saveState();
-  toast('Trimestre ' + t + ' activo');
+  toast(TRIM_NAMES[t] + ' activo');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1240,19 +1270,89 @@ function updateInicioDashboard() {
   document.getElementById('kpi-cursos').textContent = cursoIds.length;
 
   let totalAlumnos = 0, totalPos = 0, totalNeg = 0, totalNotas = 0;
+
+  // Datos por etapas
+  const etapasData = { infantil: { alumnos: 0, pos: 0, neg: 0, total: 0 },
+                       primaria: { alumnos: 0, pos: 0, neg: 0, total: 0 },
+                       tea: { alumnos: 0, pos: 0, neg: 0, total: 0 } };
+
+  // Datos de suspensas por alumno (centro completo)
+  let suspensasDistribucion = { 0: 0, 1: 0, 2: 0, '3+': 0 };
+
+  // Stats por materia (para encontrar las más difíciles)
+  const materiaStats = {};
+
   cursoIds.forEach(id => {
     const c = data[id];
-    totalAlumnos += c.alumnos ? c.alumnos.length : 0;
+    const numAlumnos = c.alumnos ? c.alumnos.length : 0;
+    totalAlumnos += numAlumnos;
+
+    // Acumular por etapas
+    if (c.tipo && etapasData[c.tipo]) {
+      etapasData[c.tipo].alumnos += numAlumnos;
+      if (c.stats) {
+        etapasData[c.tipo].pos += c.stats.pos || 0;
+        etapasData[c.tipo].neg += c.stats.neg || 0;
+        etapasData[c.tipo].total += c.stats.total || 0;
+      }
+    }
+
     if (c.stats) {
       totalPos += c.stats.pos || 0;
       totalNeg += c.stats.neg || 0;
       totalNotas += c.stats.total || 0;
+
+      // Calcular suspensas por alumno
+      const negGrades = c.tipo === 'primaria' ? ['IN'] : 
+                        c.tipo === 'infantil' ? ['NAD'] : [];
+      const posGrades = c.stats.posGrades || [];
+
+      if (c.alumnos && negGrades.length > 0) {
+        c.alumnos.forEach(a => {
+          const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+          const numSuspensas = notas.filter(v => negGrades.includes(v)).length;
+
+          if (numSuspensas === 0) suspensasDistribucion[0]++;
+          else if (numSuspensas === 1) suspensasDistribucion[1]++;
+          else if (numSuspensas === 2) suspensasDistribucion[2]++;
+          else suspensasDistribucion['3+']++;
+        });
+      }
+
+      // Acumular stats por materia
+      if (c.stats.matStats) {
+        c.mats.forEach(mat => {
+          if (!materiaStats[mat]) materiaStats[mat] = { total: 0, neg: 0, pctNeg: 0 };
+          const ms = c.stats.matStats[mat] || {};
+          const matTotal = Object.values(ms).reduce((a, b) => a + b, 0);
+          const matNeg = negGrades.reduce((a, g) => a + (ms[g] || 0), 0);
+          materiaStats[mat].total += matTotal;
+          materiaStats[mat].neg += matNeg;
+        });
+      }
     }
+  });
+
+  // Calcular % de negativos por materia
+  Object.keys(materiaStats).forEach(mat => {
+    const m = materiaStats[mat];
+    m.pctNeg = m.total ? Math.round(m.neg / m.total * 100) : 0;
   });
 
   document.getElementById('kpi-alumnos').textContent = totalAlumnos;
   document.getElementById('kpi-pos').textContent = totalNotas ? Math.round(totalPos/totalNotas*100)+'%' : '—';
   document.getElementById('kpi-neg').textContent = totalNotas ? Math.round(totalNeg/totalNotas*100)+'%' : '—';
+
+  // Mostrar/ocultar gráficas según haya datos
+  const chartsCard = document.getElementById('inicio-charts-card');
+  if (chartsCard) {
+    chartsCard.style.display = cursoIds.length > 0 ? 'block' : 'none';
+  }
+
+  // Renderizar gráficas del centro
+  if (cursoIds.length > 0) {
+    renderInicioCharts(etapasData, materiaStats, suspensasDistribucion, totalAlumnos);
+  }
 
   const list = document.getElementById('inicio-cursos-list');
   if (!cursoIds.length) {
@@ -1274,6 +1374,152 @@ function updateInicioDashboard() {
         <div style="font-size:11px;color:var(--gris)">${c.alumnos?c.alumnos.length:0} alumnos · ${c.stats?c.stats.total:0} cal.</div>
       </div>`;
     }).join('') + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GRÁFICAS DE LA PÁGINA DE INICIO
+// ═══════════════════════════════════════════════════════════════
+function renderInicioCharts(etapasData, materiaStats, suspensasDistribucion, totalAlumnos) {
+  // Destruir gráficas anteriores
+  ['chart-etapas', 'chart-dificultad', 'chart-suspensas'].forEach(id => {
+    if (_charts[id]) { _charts[id].destroy(); delete _charts[id]; }
+  });
+
+  // 1. Gráfica de barras: Resultados por etapa
+  const etapasEl = document.getElementById('chart-etapas');
+  if (etapasEl) {
+    const etapasLabels = [];
+    const etapasPos = [];
+    const etapasNeg = [];
+
+    if (etapasData.infantil.total > 0) {
+      etapasLabels.push('Infantil');
+      etapasPos.push(Math.round(etapasData.infantil.pos / etapasData.infantil.total * 100));
+      etapasNeg.push(Math.round(etapasData.infantil.neg / etapasData.infantil.total * 100));
+    }
+    if (etapasData.primaria.total > 0) {
+      etapasLabels.push('Primaria');
+      etapasPos.push(Math.round(etapasData.primaria.pos / etapasData.primaria.total * 100));
+      etapasNeg.push(Math.round(etapasData.primaria.neg / etapasData.primaria.total * 100));
+    }
+    if (etapasData.tea.total > 0) {
+      etapasLabels.push('TEA');
+      etapasPos.push(Math.round(etapasData.tea.pos / etapasData.tea.total * 100));
+      etapasNeg.push(Math.round(etapasData.tea.neg / etapasData.tea.total * 100));
+    }
+
+    _charts['chart-etapas'] = new Chart(etapasEl, {
+      type: 'bar',
+      data: {
+        labels: etapasLabels,
+        datasets: [
+          { label: '% Positivos', data: etapasPos, backgroundColor: '#2E7D32', borderRadius: 4 },
+          { label: '% Negativos (IN/NAD)', data: etapasNeg, backgroundColor: '#C62828', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } },
+        scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } } }
+      }
+    });
+  }
+
+  // 2. Gráfica horizontal: Materias con más dificultad (más % de IN/NAD)
+  const dificultadEl = document.getElementById('chart-dificultad');
+  if (dificultadEl) {
+    const matsConNeg = Object.entries(materiaStats)
+      .filter(([_, m]) => m.neg > 0)
+      .sort((a, b) => b[1].pctNeg - a[1].pctNeg)
+      .slice(0, 8); // Top 8 materias con más dificultad
+
+    if (matsConNeg.length > 0) {
+      _charts['chart-dificultad'] = new Chart(dificultadEl, {
+        type: 'bar',
+        data: {
+          labels: matsConNeg.map(([mat, _]) => mat),
+          datasets: [{
+            label: '% Negativos (IN/NAD)',
+            data: matsConNeg.map(([_, m]) => m.pctNeg),
+            backgroundColor: matsConNeg.map(([_, m]) => m.pctNeg >= 20 ? '#C62828' : m.pctNeg >= 10 ? '#F57F17' : '#E65100'),
+            borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { x: { min: 0, max: 100, ticks: { callback: v => v + '%' } } }
+        }
+      });
+    } else {
+      dificultadEl.parentElement.innerHTML = '<div style="text-align:center;padding:40px;color:#2E7D32;font-weight:700">✅ No hay negativos en ninguna materia</div>';
+    }
+  }
+
+  // 3. KPIs y gráfica de distribución de suspensas
+  const suspensasKpis = document.getElementById('suspensas-kpis');
+  if (suspensasKpis && totalAlumnos > 0) {
+    const pct0 = Math.round(suspensasDistribucion[0] / totalAlumnos * 100);
+    const pct1 = Math.round(suspensasDistribucion[1] / totalAlumnos * 100);
+    const pct2 = Math.round(suspensasDistribucion[2] / totalAlumnos * 100);
+    const pct3 = Math.round(suspensasDistribucion['3+'] / totalAlumnos * 100);
+
+    suspensasKpis.innerHTML = `
+      <div class="kpi pos" style="border-top-color:#2E7D32">
+        <div class="kpi-val" style="color:#2E7D32">${suspensasDistribucion[0]}</div>
+        <div class="kpi-lbl">0 suspensas</div>
+        <div class="kpi-sub">${pct0}% del centro</div>
+      </div>
+      <div class="kpi" style="border-top-color:#F57F17">
+        <div class="kpi-val" style="color:#F57F17">${suspensasDistribucion[1]}</div>
+        <div class="kpi-lbl">1 suspensa</div>
+        <div class="kpi-sub">${pct1}% del centro</div>
+      </div>
+      <div class="kpi" style="border-top-color:#E65100">
+        <div class="kpi-val" style="color:#E65100">${suspensasDistribucion[2]}</div>
+        <div class="kpi-lbl">2 suspensas</div>
+        <div class="kpi-sub">${pct2}% del centro</div>
+      </div>
+      <div class="kpi ins" style="border-top-color:#C62828">
+        <div class="kpi-val" style="color:#C62828">${suspensasDistribucion['3+']}</div>
+        <div class="kpi-lbl">3+ suspensas</div>
+        <div class="kpi-sub">${pct3}% del centro</div>
+      </div>
+    `;
+
+    // Gráfica de barras de suspensas
+    const suspensasEl = document.getElementById('chart-suspensas');
+    if (suspensasEl) {
+      _charts['chart-suspensas'] = new Chart(suspensasEl, {
+        type: 'bar',
+        data: {
+          labels: ['0 suspensas', '1 suspensa', '2 suspensas', '3+ suspensas'],
+          datasets: [{
+            label: 'Nº de alumnos',
+            data: [suspensasDistribucion[0], suspensasDistribucion[1], suspensasDistribucion[2], suspensasDistribucion['3+']],
+            backgroundColor: ['#2E7D32', '#F57F17', '#E65100', '#C62828'],
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { 
+            legend: { display: false },
+            tooltip: { 
+              callbacks: { 
+                label: ctx => {
+                  const pct = Math.round(ctx.parsed.y / totalAlumnos * 100);
+                  return ` ${ctx.parsed.y} alumnos (${pct}%)`;
+                }
+              }
+            }
+          },
+          scales: { y: { ticks: { stepSize: 1 }, title: { display: true, text: 'Nº alumnos' } } }
+        }
+      });
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2053,8 +2299,13 @@ function selectCurso(cursoId) {
   const posGradesSet = new Set(stats.posGrades);
   const negGradesSet = new Set(stats.negGrades);
   let alumnosTodosPos = 0, alumnosMayoriaPos = 0, alumnosConNeg = 0;
+
+  // NUEVO: Distribución de suspensas por alumno
+  let suspensasPorAlumno = { 0: 0, 1: 0, 2: 0, '3+': 0 };
+  const detalleSuspensas = []; // Para mostrar qué materias
+
   if (c.alumnos) {
-    c.alumnos.forEach(a => {
+    c.alumnos.forEach((a, idx) => {
       const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
       if (!notas.length) return;
       const negCount = notas.filter(v => negGradesSet.has(v)).length;
@@ -2062,8 +2313,28 @@ function selectCurso(cursoId) {
       if (negCount === 0 && posCount > 0) alumnosTodosPos++;
       else if (posCount > notas.length / 2) alumnosMayoriaPos++;
       if (negCount > 0) alumnosConNeg++;
+
+      // Contar suspensas
+      if (negCount === 0) suspensasPorAlumno[0]++;
+      else if (negCount === 1) {
+        suspensasPorAlumno[1]++;
+        // Guardar qué materia
+        const matSus = c.mats.find(m => negGradesSet.has(a.notas[m]));
+        detalleSuspensas.push({ alumno: idx + 1, materia: matSus });
+      }
+      else if (negCount === 2) {
+        suspensasPorAlumno[2]++;
+        const matsSus = c.mats.filter(m => negGradesSet.has(a.notas[m]));
+        detalleSuspensas.push({ alumno: idx + 1, materias: matsSus });
+      }
+      else {
+        suspensasPorAlumno['3+']++;
+        const matsSus = c.mats.filter(m => negGradesSet.has(a.notas[m]));
+        detalleSuspensas.push({ alumno: idx + 1, materias: matsSus, count: negCount });
+      }
     });
   }
+
 
   // ── Tabla por materia ─────────────────────────────────────────
   let tblHtml = `<div class="card"><div class="card-title">📊 Resultados por materia</div>
@@ -2161,6 +2432,38 @@ function selectCurso(cursoId) {
       </div>
     </div>
 
+
+    <!-- NUEVO: Distribución de suspensas por alumno -->
+    <div class="card" style="border-left:4px solid var(--azulM);margin-bottom:16px">
+      <div class="card-title">🎓 Distribución de alumnos por número de suspensas</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi pos" style="border-top-color:#2E7D32">
+          <div class="kpi-val" style="color:#2E7D32">${suspensasPorAlumno[0]}</div>
+          <div class="kpi-lbl">0 suspensas</div>
+          <div class="kpi-sub">${numAlumnos ? Math.round(suspensasPorAlumno[0]/numAlumnos*100) : 0}%</div>
+        </div>
+        <div class="kpi" style="border-top-color:#F57F17">
+          <div class="kpi-val" style="color:#F57F17">${suspensasPorAlumno[1]}</div>
+          <div class="kpi-lbl">1 suspensa</div>
+          <div class="kpi-sub">${numAlumnos ? Math.round(suspensasPorAlumno[1]/numAlumnos*100) : 0}%</div>
+        </div>
+        <div class="kpi" style="border-top-color:#E65100">
+          <div class="kpi-val" style="color:#E65100">${suspensasPorAlumno[2]}</div>
+          <div class="kpi-lbl">2 suspensas</div>
+          <div class="kpi-sub">${numAlumnos ? Math.round(suspensasPorAlumno[2]/numAlumnos*100) : 0}%</div>
+        </div>
+        <div class="kpi ins" style="border-top-color:#C62828">
+          <div class="kpi-val" style="color:#C62828">${suspensasPorAlumno['3+']}</div>
+          <div class="kpi-lbl">3+ suspensas</div>
+          <div class="kpi-sub">${numAlumnos ? Math.round(suspensasPorAlumno['3+']/numAlumnos*100) : 0}%</div>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:200px;margin-bottom:12px"><canvas id="c-suspensas-${cursoId}"></canvas></div>
+      <p style="font-size:11px;color:var(--gris)">
+        <strong>Nota:</strong> En Primaria "IN" = Suspenso | En Infantil "NAD" = No Adquirido
+      </p>
+    </div>
+
     <!-- Fila 1: Dona + Barras apiladas -->
     <div class="chart-grid">
       <div class="chart-card"><div class="card-title">🍩 Distribución global de calificaciones</div>
@@ -2212,7 +2515,7 @@ function renderCursoCharts(id, c, grades) {
     ADE:'rgba(245,127,23,0.15)',NAD:'rgba(198,40,40,0.15)'
   };
 
-  const allChartIds = ['c-dona-','c-bar-','c-hbar-','c-radar-','c-alumnos-','c-neg-'];
+  const allChartIds = ['c-dona-','c-bar-','c-hbar-','c-radar-','c-alumnos-','c-neg-','c-suspensas-'];
   allChartIds.forEach(prefix => {
     const cid = prefix+id;
     if (_charts[cid]) { _charts[cid].destroy(); delete _charts[cid]; }
@@ -2460,6 +2763,52 @@ function renderCursoCharts(id, c, grades) {
     hmDiv.innerHTML = html;
   } else if (hmDiv) {
     hmDiv.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--gris)">Sin datos de alumnos</div>`;
+  }
+
+  // ── 8. Gráfica de suspensas por alumno ─────────────────────────
+  const suspensasEl = document.getElementById('c-suspensas-'+id);
+  if (suspensasEl && c.alumnos && c.alumnos.length) {
+    const negGradesSet = new Set(c.stats.negGrades || []);
+    const suspensasCount = { 0: 0, 1: 0, 2: 0, '3+': 0 };
+
+    c.alumnos.forEach(a => {
+      const notas = c.mats.map(m => a.notas[m]).filter(v => v && v !== '');
+      const numSuspensas = notas.filter(v => negGradesSet.has(v)).length;
+      if (numSuspensas === 0) suspensasCount[0]++;
+      else if (numSuspensas === 1) suspensasCount[1]++;
+      else if (numSuspensas === 2) suspensasCount[2]++;
+      else suspensasCount['3+']++;
+    });
+
+    _charts['c-suspensas-'+id] = new Chart(suspensasEl, {
+      type: 'bar',
+      data: {
+        labels: ['0 suspensas', '1 suspensa', '2 suspensas', '3+ suspensas'],
+        datasets: [{
+          label: 'Nº de alumnos',
+          data: [suspensasCount[0], suspensasCount[1], suspensasCount[2], suspensasCount['3+']],
+          backgroundColor: ['#2E7D32', '#F57F17', '#E65100', '#C62828'],
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const pct = Math.round(ctx.parsed.y / c.alumnos.length * 100);
+                return ` ${ctx.parsed.y} alumnos (${pct}%)`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: { ticks: { stepSize: 1 }, title: { display: true, text: 'Nº alumnos', font: { size: 10 } } }
+        }
+      }
+    });
   }
 }
 
