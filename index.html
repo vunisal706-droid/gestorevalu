@@ -288,6 +288,25 @@ tbody td:first-child{text-align:left;font-weight:500}
 .anyo-select option{color:#263238;background:#fff}
 .anyo-select:hover{background:rgba(255,255,255,.28)}
 
+/* ── PLAN DE MEJORA DE RESULTADOS ── */
+.pm-timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.pm-tl{background:#fff;border-radius:var(--r);padding:14px;text-align:center;box-shadow:var(--shadow);border-top:4px solid #ccc}
+.pm-tl-t{font-size:12px;font-weight:700;margin-bottom:4px}
+.pm-tl-n{font-size:28px;font-weight:800}
+.pm-tl-s{font-size:10px;color:var(--gris)}
+.pm-item{background:#fff;border-radius:var(--r);box-shadow:var(--shadow);padding:14px;margin-bottom:12px;border-left:5px solid #ccc}
+.pm-item.done{opacity:.55}
+.pm-item-head{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}
+.pm-item input[type=text],.pm-item textarea,.pm-item select{
+  width:100%;border:1px solid #E0E0E0;border-radius:8px;padding:7px 10px;font-size:13px;
+  font-family:inherit;background:#FAFAFA}
+.pm-item textarea{resize:vertical;min-height:56px}
+.pm-item-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+@media(max-width:700px){.pm-item-row{grid-template-columns:1fr}}
+.pm-item-lbl{font-size:10px;font-weight:700;color:var(--gris);text-transform:uppercase;margin-bottom:2px;display:block}
+.pm-group-title{font-size:15px;font-weight:800;margin:18px 0 10px;display:flex;align-items:center;gap:8px}
+.pm-auto-badge{font-size:9px;background:#E8EAF6;color:#1A237E;border-radius:10px;padding:2px 8px;font-weight:700}
+
 /* ── LOGO TRIMESTRE ── */
 .trim-logo-wrap{text-align:center;padding:6px 0 3px}
 .trim-logo{max-width:70px;max-height:70px;border-radius:12px;
@@ -550,6 +569,9 @@ if ('serviceWorker' in navigator) {
   </div>
   <div class="nav-tab" onclick="showSection('comparativa')" id="tab-comparativa">
     <span class="nav-tab-ico">📈</span>Comparativa
+  </div>
+  <div class="nav-tab" onclick="showSection('mejora')" id="tab-mejora">
+    <span class="nav-tab-ico">🚀</span>Plan de Mejora
   </div>
   <div class="nav-tab" onclick="showSection('claude')" id="tab-claude">
     <span class="nav-tab-ico">🤖</span>Analizar con IA
@@ -850,6 +872,33 @@ if ('serviceWorker' in navigator) {
 </div>
 
 <!-- ════════════════════════════════════════════════════════ -->
+<!-- PLAN DE MEJORA DE RESULTADOS -->
+<!-- ════════════════════════════════════════════════════════ -->
+<div id="sec-mejora" class="section">
+  <div class="banner" style="background:linear-gradient(135deg,#4E342E,#BF360C)">
+    <h2>🚀 Plan de Mejora de Resultados</h2>
+    <p id="pm-banner-sub">Acciones derivadas del análisis del trimestre activo. Edita, añade o genera propuestas automáticas y descárgalo en Word.</p>
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+    <button class="btn btn-primary" onclick="genPropuestasMejora()">✨ Generar propuestas automáticas</button>
+    <button class="btn btn-blue" onclick="addPlanItem()">➕ Añadir acción</button>
+    <button class="btn" style="background:#1B5E20;color:#fff" onclick="downloadPlanWord()">📝 Descargar Word</button>
+    <span id="pm-save-status" style="font-size:11px;color:var(--gris)"></span>
+  </div>
+
+  <div class="pm-timeline" id="pm-timeline"></div>
+
+  <div id="pm-list">
+    <div class="empty">
+      <div class="empty-ico">🚀</div>
+      <h3>Aún no hay acciones en el plan</h3>
+      <p>Pulsa «✨ Generar propuestas automáticas» para crear un borrador a partir de las notas del trimestre, o «➕ Añadir acción» para empezar desde cero.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ -->
 <!-- CLAUDE / IA -->
 <!-- ════════════════════════════════════════════════════════ -->
 <div id="sec-claude" class="section">
@@ -983,6 +1032,8 @@ let state = {
   useFirebase: false,
   // datos[anyo][trimestre][cursoId] = { tipo, materias, alumnos: [{ id, notas }] }
   datos: {},
+  // mejora[anyo][trimestre] = { items:[], updatedAt }
+  mejora: {},
   // import temp
   imp: { file: null, raw: null, tipo: null, curso: null, parsed: null }
 };
@@ -1182,6 +1233,7 @@ function loadState() {
       state.trimestre = s.trimestre || 1;
       state.anyo = s.anyo || '2025/2026';
       state.datos = s.datos || {};
+      state.mejora = s.mejora || {};
     }
   } catch(e) {}
 }
@@ -1191,7 +1243,8 @@ function saveState() {
     localStorage.setItem('cap_state', JSON.stringify({
       trimestre: state.trimestre,
       anyo: state.anyo,
-      datos: state.datos
+      datos: state.datos,
+      mejora: state.mejora
     }));
   } catch(e) { toast('⚠️ Error al guardar (almacenamiento lleno)', true); }
 }
@@ -1241,6 +1294,7 @@ function showSection(id) {
   // Refresh on show
   if (id==='cursos') populateCursosChips();
   if (id==='comparativa') renderComparativa();
+  if (id==='mejora') { renderMejora(); planFromFirebase(); }
   if (id==='informes') populateInformeSelects();
   if (id==='inicio') updateInicioDashboard();
 }
@@ -1293,6 +1347,7 @@ function setTrimestre(t) {
   populateCursosChips();
   populateInformeSelects();
   populateComparativaSelects();
+  if (document.getElementById('sec-mejora')?.classList.contains('active')) { renderMejora(); planFromFirebase(); }
   saveState();
   toast(TRIM_NAMES[t] + ' activo');
 }
@@ -1343,6 +1398,7 @@ function setAnyo(a, esNuevo) {
   populateComparativaSelects();
   populateAnyoSelect();
   if (typeof populateClaudeSelects === 'function') populateClaudeSelects();
+  if (document.getElementById('sec-mejora')?.classList.contains('active')) { renderMejora(); planFromFirebase(); }
   saveState();
   toast(esNuevo
     ? '🎒 Curso ' + a + ' creado. Los datos de cursos anteriores se conservan.'
@@ -3447,6 +3503,342 @@ function generateInformeTEA() {
   const tea = data['tea'];
   if (!tea) return toast('No hay datos del Aula TEA', true);
   generateActaForCurso('tea');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PLAN DE MEJORA DE RESULTADOS
+// ═══════════════════════════════════════════════════════════════
+const PLAN_PLAZOS = {
+  urgente:   { label: '🔴 Urgente',           sub: 'acciones inmediatas',        color: '#C62828', bg: '#FFEBEE' },
+  trimestre: { label: '🟡 Próximo trimestre', sub: 'acciones planificadas',      color: '#F57F17', bg: '#FFF8E1' },
+  fincurso:  { label: '🔵 Fin de curso',      sub: 'acciones de cierre',         color: '#1565C0', bg: '#E3F2FD' },
+  fortaleza: { label: '🟢 Fortalezas',        sub: 'buenas prácticas a mantener', color: '#2E7D32', bg: '#E8F5E9' }
+};
+const PLAN_AREAS = ['Curricular','Atención a la Diversidad','Metodológica e Innovación','Familias y Convivencia','Organizativa','Otra'];
+
+function escPM(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function getPlan() {
+  if (!state.mejora) state.mejora = {};
+  if (!state.mejora[state.anyo]) state.mejora[state.anyo] = {};
+  if (!state.mejora[state.anyo][state.trimestre]) {
+    state.mejora[state.anyo][state.trimestre] = { items: [], updatedAt: '' };
+  }
+  const p = state.mejora[state.anyo][state.trimestre];
+  if (!Array.isArray(p.items)) p.items = [];
+  return p;
+}
+
+let _pmFbTimer;
+function savePlanState() {
+  const plan = getPlan();
+  plan.updatedAt = new Date().toISOString();
+  saveState();
+  const st = document.getElementById('pm-save-status');
+  if (st) st.textContent = '💾 Guardado localmente';
+  // Debounce Firebase
+  clearTimeout(_pmFbTimer);
+  _pmFbTimer = setTimeout(planToFirebase, 1200);
+}
+
+function planFbKey() {
+  return (state.anyo + '_T' + state.trimestre).replace(/\//g, '-').replace(/\./g, '_');
+}
+
+function planToFirebase() {
+  if (!window._db) return;
+  const plan = getPlan();
+  window._db.ref('planesMejora/' + planFbKey()).set({
+    anyo: state.anyo, trimestre: state.trimestre,
+    items: plan.items, updatedAt: plan.updatedAt
+  }).then(() => {
+    const st = document.getElementById('pm-save-status');
+    if (st) st.textContent = '☁️ Guardado en la nube';
+  }).catch(e => console.warn('Plan mejora FB save:', e));
+}
+
+function planFromFirebase() {
+  if (!window._db) return;
+  window._db.ref('planesMejora/' + planFbKey()).once('value').then(snap => {
+    const rec = snap.val();
+    if (!rec || !Array.isArray(rec.items)) return;
+    const local = getPlan();
+    if ((rec.updatedAt || '') > (local.updatedAt || '')) {
+      local.items = rec.items;
+      local.updatedAt = rec.updatedAt;
+      saveState();
+      renderMejora();
+      toast('☁️ Plan de mejora sincronizado desde Firebase');
+    }
+  }).catch(e => console.warn('Plan mejora FB load:', e));
+}
+
+// ── Generador de propuestas a partir de las notas ────────────────
+function genPropuestasMejora() {
+  const data = getData();
+  const cursoIds = Object.keys(data);
+  if (!cursoIds.length) return toast('No hay datos importados en este trimestre', true);
+
+  const plan = getPlan();
+  const existingKeys = new Set(plan.items.map(i => i.key).filter(Boolean));
+  const nuevos = [];
+
+  // Fortalezas globales por materia (0 negativos en todos los cursos donde existe)
+  const matGlobal = {}; // mat -> {tot, neg, cursos:[]}
+
+  cursoIds.forEach(cid => {
+    const c = data[cid];
+    if (!c || !c.stats) return;
+    const label = CURSOS_CONFIG[cid]?.label || cid;
+    const negSet = new Set(c.stats.negGrades || []);
+
+    // 1) Materias con negativos → refuerzo
+    (c.mats || []).forEach(m => {
+      const ms = c.stats.matStats?.[m] || {};
+      const tot = Object.values(ms).reduce((a,b)=>a+b,0);
+      const neg = [...negSet].reduce((a,g)=>a+(ms[g]||0),0);
+      if (!matGlobal[m]) matGlobal[m] = { tot: 0, neg: 0, cursos: [] };
+      matGlobal[m].tot += tot; matGlobal[m].neg += neg;
+      if (tot) matGlobal[m].cursos.push(label);
+      if (!tot || !neg) return;
+      const pctN = Math.round(neg / tot * 100);
+      const key = 'ref_' + cid + '_' + m;
+      if (existingKeys.has(key)) return;
+      nuevos.push({
+        key, auto: true, done: false,
+        plazo: pctN >= 20 ? 'urgente' : 'trimestre',
+        area: 'Curricular',
+        titulo: `Plan de refuerzo en ${m} — ${label}`,
+        desc: `${neg} calificación/es negativa/s de ${tot} (${pctN}%). Revisar programación e instrumentos de evaluación; proponer refuerzo, agrupamientos flexibles y seguimiento individualizado.`,
+        resp: 'Tutor/a · PT'
+      });
+    });
+
+    // 2) Alumnado con 3+ negativos → atención a la diversidad
+    let al3 = 0;
+    (c.alumnos || []).forEach(a => {
+      const n = (c.mats || []).filter(m => negSet.has(a.notas[m])).length;
+      if (n >= 3) al3++;
+    });
+    if (al3 > 0) {
+      const key = 'div_' + cid;
+      if (!existingKeys.has(key)) nuevos.push({
+        key, auto: true, done: false,
+        plazo: 'urgente',
+        area: 'Atención a la Diversidad',
+        titulo: `Valoración del alumnado con 3+ áreas suspensas — ${label}`,
+        desc: `${al3} alumno/s acumulan 3 o más calificaciones negativas. Valorar derivación a orientación, revisar medidas de atención a la diversidad y convocar tutorías con las familias.`,
+        resp: 'Orientación · PT · Tutor/a'
+      });
+    }
+  });
+
+  // 3) Fortalezas: materias sin ningún negativo en el trimestre
+  Object.entries(matGlobal).forEach(([m, g]) => {
+    if (!g.tot || g.neg > 0) return;
+    const key = 'fort_' + m;
+    if (existingKeys.has(key)) return;
+    nuevos.push({
+      key, auto: true, done: false,
+      plazo: 'fortaleza',
+      area: 'Metodológica e Innovación',
+      titulo: `Buenas prácticas en ${m} (0% de negativos)`,
+      desc: `${m} no presenta ninguna calificación negativa en ${g.cursos.length} curso/s (${g.cursos.join(', ')}). Documentar y compartir la metodología con el claustro como referente.`,
+      resp: 'Docentes de ' + m + ' · Dirección'
+    });
+  });
+
+  if (!nuevos.length) return toast('No hay propuestas nuevas que añadir (ya existen o no hay incidencias)');
+  plan.items.push(...nuevos);
+  savePlanState();
+  renderMejora();
+  toast('✨ ' + nuevos.length + ' propuesta/s añadida/s al plan');
+}
+
+// ── CRUD ─────────────────────────────────────────────────────────
+function addPlanItem() {
+  const plan = getPlan();
+  plan.items.push({ key: 'man_' + Date.now(), auto: false, done: false,
+    plazo: 'trimestre', area: 'Curricular', titulo: '', desc: '', resp: '' });
+  savePlanState();
+  renderMejora();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#pm-list input[type=text]');
+    if (inputs.length) inputs[inputs.length-1].focus();
+  }, 50);
+}
+
+function updatePlanItem(idx, field, value) {
+  const plan = getPlan();
+  if (!plan.items[idx]) return;
+  plan.items[idx][field] = value;
+  savePlanState();
+  if (field === 'plazo' || field === 'done') renderMejora();
+  else renderPlanSummary();
+}
+
+function delPlanItem(idx) {
+  const plan = getPlan();
+  if (!plan.items[idx]) return;
+  if (!confirm('¿Eliminar esta acción del plan?')) return;
+  plan.items.splice(idx, 1);
+  savePlanState();
+  renderMejora();
+}
+
+// ── Render ───────────────────────────────────────────────────────
+function renderPlanSummary() {
+  const plan = getPlan();
+  const tl = document.getElementById('pm-timeline');
+  if (!tl) return;
+  tl.innerHTML = Object.entries(PLAN_PLAZOS).map(([k, p]) => {
+    const items = plan.items.filter(i => i.plazo === k);
+    const done = items.filter(i => i.done).length;
+    return `<div class="pm-tl" style="border-top-color:${p.color}">
+      <div class="pm-tl-t" style="color:${p.color}">${p.label}</div>
+      <div class="pm-tl-n" style="color:${p.color}">${items.length}</div>
+      <div class="pm-tl-s">${p.sub}${items.length ? ' · ' + done + ' completada/s' : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderMejora() {
+  const plan = getPlan();
+  const sub = document.getElementById('pm-banner-sub');
+  if (sub) sub.textContent = TRIM_NAMES[state.trimestre] + ' · Curso ' + state.anyo +
+    ' — Edita, añade o genera propuestas automáticas y descárgalo en Word.';
+
+  renderPlanSummary();
+
+  const list = document.getElementById('pm-list');
+  if (!list) return;
+
+  if (!plan.items.length) {
+    list.innerHTML = `<div class="empty"><div class="empty-ico">🚀</div>
+      <h3>Aún no hay acciones en el plan</h3>
+      <p>Pulsa «✨ Generar propuestas automáticas» para crear un borrador a partir de las notas del trimestre, o «➕ Añadir acción» para empezar desde cero.</p></div>`;
+    return;
+  }
+
+  let html = '';
+  Object.entries(PLAN_PLAZOS).forEach(([k, p]) => {
+    const grupo = plan.items.map((it, idx) => ({ it, idx })).filter(x => x.it.plazo === k);
+    if (!grupo.length) return;
+    html += `<div class="pm-group-title" style="color:${p.color}">${p.label}
+      <span style="font-size:11px;font-weight:600;color:var(--gris)">(${grupo.length})</span></div>`;
+    grupo.forEach(({ it, idx }) => {
+      html += `<div class="pm-item ${it.done ? 'done' : ''}" style="border-left-color:${p.color}">
+        <div class="pm-item-head">
+          <input type="checkbox" ${it.done ? 'checked' : ''} title="Completada"
+            onchange="updatePlanItem(${idx},'done',this.checked)" style="margin-top:9px">
+          <div style="flex:1">
+            <input type="text" placeholder="Título de la acción…" value="${escPM(it.titulo)}"
+              style="font-weight:700;font-size:14px"
+              oninput="updatePlanItem(${idx},'titulo',this.value)">
+          </div>
+          ${it.auto ? '<span class="pm-auto-badge" title="Generada automáticamente">AUTO</span>' : ''}
+          <button class="btn-icon" onclick="delPlanItem(${idx})" title="Eliminar" style="color:#C62828">🗑️</button>
+        </div>
+        <textarea placeholder="Descripción, datos y medidas concretas…"
+          oninput="updatePlanItem(${idx},'desc',this.value)">${escPM(it.desc)}</textarea>
+        <div class="pm-item-row">
+          <div><span class="pm-item-lbl">Plazo</span>
+            <select onchange="updatePlanItem(${idx},'plazo',this.value)">
+              ${Object.entries(PLAN_PLAZOS).map(([pk, pp]) =>
+                `<option value="${pk}" ${pk === it.plazo ? 'selected' : ''}>${pp.label}</option>`).join('')}
+            </select></div>
+          <div><span class="pm-item-lbl">Área</span>
+            <select onchange="updatePlanItem(${idx},'area',this.value)">
+              ${PLAN_AREAS.map(a => `<option ${a === it.area ? 'selected' : ''}>${a}</option>`).join('')}
+            </select></div>
+          <div><span class="pm-item-lbl">Responsables</span>
+            <input type="text" placeholder="Tutor/a · PT · Dirección…" value="${escPM(it.resp)}"
+              oninput="updatePlanItem(${idx},'resp',this.value)"></div>
+        </div>
+      </div>`;
+    });
+  });
+  list.innerHTML = html;
+}
+
+// ── Exportar a Word (.doc generado con HTML compatible) ──────────
+function downloadPlanWord() {
+  const plan = getPlan();
+  if (!plan.items.length) return toast('El plan está vacío: añade o genera acciones primero', true);
+
+  const tName = TRIM_NAMES[state.trimestre];
+  const fecha = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+  const counts = Object.fromEntries(Object.keys(PLAN_PLAZOS).map(k =>
+    [k, plan.items.filter(i => i.plazo === k).length]));
+
+  let body = `
+    <p style="text-align:center;color:#666;margin:0">CEIP CAPITULACIONES DE SANTA FE · Código 18008853</p>
+    <h1 style="text-align:center;color:#1A237E;margin:12px 0 4px">PLAN DE MEJORA DE RESULTADOS</h1>
+    <p style="text-align:center;font-size:14pt;margin:0"><strong>${escPM(tName)} · Curso ${escPM(state.anyo)}</strong></p>
+    <p style="text-align:center;color:#666;font-size:10pt">Documento generado el ${fecha} a partir del análisis de resultados académicos</p>
+    <h2 style="color:#1A237E">1. Resumen por plazo de ejecución</h2>
+    <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%">
+      <tr style="background:#1A237E;color:#fff"><th>Plazo</th><th>Nº de acciones</th></tr>
+      ${Object.entries(PLAN_PLAZOS).map(([k, p]) =>
+        `<tr><td>${p.label.replace(/[🔴🟡🔵🟢] /,'')}</td><td style="text-align:center">${counts[k]}</td></tr>`).join('')}
+      <tr style="font-weight:bold;background:#E8EAF6"><td>TOTAL</td><td style="text-align:center">${plan.items.length}</td></tr>
+    </table>`;
+
+  let n = 0, secNum = 2;
+  Object.entries(PLAN_PLAZOS).forEach(([k, p]) => {
+    const grupo = plan.items.filter(i => i.plazo === k);
+    if (!grupo.length) return;
+    body += `<h2 style="color:${p.color}">${secNum++}. ${p.label.replace(/[🔴🟡🔵🟢] /,'')} (${grupo.length})</h2>
+      <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;width:100%">
+        <tr style="background:${p.color};color:#fff">
+          <th style="width:4%">#</th><th style="width:26%">Acción</th><th style="width:40%">Descripción y medidas</th>
+          <th style="width:12%">Área</th><th style="width:14%">Responsables</th><th style="width:4%">✔</th></tr>`;
+    grupo.forEach(it => {
+      n++;
+      body += `<tr>
+        <td style="text-align:center">${n}</td>
+        <td><strong>${escPM(it.titulo) || '(sin título)'}</strong></td>
+        <td>${escPM(it.desc).replace(/\n/g,'<br>')}</td>
+        <td>${escPM(it.area)}</td>
+        <td>${escPM(it.resp)}</td>
+        <td style="text-align:center">${it.done ? '✔' : '☐'}</td></tr>`;
+    });
+    body += `</table>`;
+  });
+
+  body += `
+    <h2 style="color:#1A237E">Seguimiento y evaluación del plan</h2>
+    <p>El presente Plan de Mejora de Resultados será objeto de seguimiento en las reuniones de los Equipos Docentes,
+    en el ETCP y en las sesiones de evaluación del trimestre siguiente. La valoración de su grado de cumplimiento
+    se incorporará a la Memoria de Autoevaluación del centro.</p>
+    <br><br>
+    <table style="width:100%"><tr>
+      <td style="text-align:center">Fdo.: El Director<br><br><br>______________________<br>Víctor M. Única Salas</td>
+      <td style="text-align:center">Fdo.: La Jefatura de Estudios<br><br><br>______________________</td>
+    </tr></table>
+    <p style="text-align:center;color:#999;font-size:9pt">Santa Fe (Granada), ${fecha}</p>`;
+
+  const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+    xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="utf-8"><title>Plan de Mejora de Resultados</title>
+    <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+    <style>body{font-family:'Calibri',sans-serif;font-size:11pt;line-height:1.4}
+    h1{font-size:18pt}h2{font-size:13pt;margin-top:18pt}
+    table{font-size:10pt}th{text-align:left}</style></head>
+    <body>${body}</body></html>`;
+
+  const blob = new Blob(['\ufeff' + doc], { type: 'application/msword' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Plan_Mejora_Resultados_T${state.trimestre}_${state.anyo.replace('/','-')}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+  toast('📝 Word del Plan de Mejora descargado');
 }
 
 // ═══════════════════════════════════════════════════════════════
