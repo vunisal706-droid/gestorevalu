@@ -280,6 +280,14 @@ tbody td:first-child{text-align:left;font-weight:500}
 .evol-table td.empeora{color:var(--rojo);font-weight:700}
 .evol-table td.igual{color:var(--gris)}
 
+/* ── SELECTOR CURSO ACADÉMICO ── */
+.anyo-select{
+  background:rgba(255,255,255,.15);color:#fff;border:2px solid rgba(255,255,255,.5);
+  border-radius:20px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;
+  outline:none;appearance:none;-webkit-appearance:none}
+.anyo-select option{color:#263238;background:#fff}
+.anyo-select:hover{background:rgba(255,255,255,.28)}
+
 /* ── LOGO TRIMESTRE ── */
 .trim-logo-wrap{text-align:center;padding:6px 0 3px}
 .trim-logo{max-width:70px;max-height:70px;border-radius:12px;
@@ -515,6 +523,7 @@ if ('serviceWorker' in navigator) {
         <div class="db-dot grey" id="dbDot"></div>
         <span id="dbLabel">DB...</span>
       </div>
+      <select class="anyo-select" id="anyoSel" onchange="onAnyoSelChange(this)" title="Curso académico"></select>
       <span class="trim-badge" id="tb1" onclick="setTrimestre(1)">Primer trimestre</span>
       <span class="trim-badge" id="tb2" onclick="setTrimestre(2)">Segundo trimestre</span>
       <span class="trim-badge" id="tb3" onclick="setTrimestre(3)">Tercer trimestre</span>
@@ -804,9 +813,24 @@ if ('serviceWorker' in navigator) {
   </div>
 
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+    <label style="font-size:13px;font-weight:600;color:var(--gris)">Modo:</label>
+    <select class="form-select" id="comp-modo" style="width:auto"
+      onchange="onCompModoChange()">
+      <option value="trimestres">🗓️ Trimestres del curso activo</option>
+      <option value="cursos">📅 Entre cursos académicos</option>
+    </select>
     <label style="font-size:13px;font-weight:600;color:var(--gris)">Curso:</label>
     <select class="form-select" id="comp-curso-sel" style="width:auto"
       onchange="renderComparativa()"></select>
+    <span id="comp-trim-wrap" style="display:none;align-items:center;gap:10px">
+      <label style="font-size:13px;font-weight:600;color:var(--gris)">Trimestre:</label>
+      <select class="form-select" id="comp-trim-sel" style="width:auto"
+        onchange="this.dataset.touched=1;renderComparativa()">
+        <option value="1">1.er Trimestre</option>
+        <option value="2">2.º Trimestre</option>
+        <option value="3">3.er Trimestre</option>
+      </select>
+    </span>
     <label style="font-size:13px;font-weight:600;color:var(--gris)">Vista:</label>
     <select class="form-select" id="comp-vista" style="width:auto"
       onchange="renderComparativa()">
@@ -1059,9 +1083,6 @@ function checkDbConnection() {
 function syncFromFirebase() {
   if (!window._db) return;
 
-  // Prefijo del año activo (ej: "2025-2026")
-  const anyoKey = state.anyo.replace(/\//g, '-').replace(/\./g, '_');
-
   window._db.ref('evaluaciones').once('value').then(function(snapshot) {
     const allData = snapshot.val();
     if (!allData) return;
@@ -1069,10 +1090,10 @@ function syncFromFirebase() {
     let imported = 0;
     Object.entries(allData).forEach(function([key, record]) {
       // Las claves tienen formato: "2025-2026_T1_2ep"
-      if (!key.startsWith(anyoKey)) return;
+      // Se sincronizan TODOS los cursos académicos (histórico multi-año)
       if (!record || !record.cursoId || !record.trimestre) return;
 
-      const anyo    = record.anyo  || state.anyo;
+      const anyo    = record.anyo || key.split('_')[0].replace(/-/g, '/');
       const trim    = record.trimestre;
       const cursoId = record.cursoId;
 
@@ -1103,6 +1124,7 @@ function syncFromFirebase() {
       populateCursosChips();
       populateInformeSelects();
       populateComparativaSelects();
+      populateAnyoSelect();
       toast('☁️ ' + imported + ' curso/s sincronizados desde Firebase');
     }
   }).catch(function(e) {
@@ -1121,6 +1143,7 @@ function init() {
   populateCursosChips();
   populateInformeSelects();
   populateComparativaSelects();
+  populateAnyoSelect();
   populateClaudeSelects();
 
   // Firebase pre-configured — skip overlay
@@ -1178,6 +1201,19 @@ function getData(trim) {
   if (!state.datos[state.anyo]) state.datos[state.anyo] = {};
   if (!state.datos[state.anyo][t]) state.datos[state.anyo][t] = {};
   return state.datos[state.anyo][t];
+}
+
+// Datos de un año académico concreto (solo lectura, no crea estructura)
+function getDataY(anyo, trim) {
+  if (!state.datos[anyo]) return {};
+  return state.datos[anyo][trim] || {};
+}
+
+// Lista de cursos académicos conocidos (con datos o activo)
+function listAnyos() {
+  const set = new Set(Object.keys(state.datos || {}));
+  set.add(state.anyo);
+  return [...set].sort();
 }
 
 function getFirebaseConfig() {
@@ -1259,6 +1295,58 @@ function setTrimestre(t) {
   populateComparativaSelects();
   saveState();
   toast(TRIM_NAMES[t] + ' activo');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CURSO ACADÉMICO (multi-año, sin borrar datos anteriores)
+// ═══════════════════════════════════════════════════════════════
+function populateAnyoSelect() {
+  const sel = document.getElementById('anyoSel');
+  if (!sel) return;
+  const anyos = listAnyos();
+  sel.innerHTML = anyos.map(a =>
+    `<option value="${a}" ${a === state.anyo ? 'selected' : ''}>📅 ${a}</option>`
+  ).join('') + '<option value="__new__">➕ Nuevo curso…</option>';
+}
+
+function sugerirSiguienteAnyo() {
+  const anyos = listAnyos();
+  const last = anyos[anyos.length - 1] || '2025/2026';
+  const m = last.match(/^(\d{4})\/(\d{4})$/);
+  if (m) return (parseInt(m[1], 10) + 1) + '/' + (parseInt(m[2], 10) + 1);
+  return '2026/2027';
+}
+
+function onAnyoSelChange(sel) {
+  if (sel.value === '__new__') {
+    const nuevo = prompt('Nuevo curso académico (formato AAAA/AAAA):', sugerirSiguienteAnyo());
+    if (!nuevo || !/^\d{4}\/\d{4}$/.test(nuevo.trim())) {
+      if (nuevo !== null) toast('⚠️ Formato no válido. Usa p. ej. 2026/2027', true);
+      populateAnyoSelect();
+      return;
+    }
+    setAnyo(nuevo.trim(), true);
+    return;
+  }
+  setAnyo(sel.value);
+}
+
+function setAnyo(a, esNuevo) {
+  state.anyo = a;
+  if (!state.datos[a]) state.datos[a] = {};
+  const cfgAnyo = document.getElementById('cfg-anyo');
+  if (cfgAnyo) cfgAnyo.value = a;
+  updateLogo();
+  updateInicioDashboard();
+  populateCursosChips();
+  populateInformeSelects();
+  populateComparativaSelects();
+  populateAnyoSelect();
+  if (typeof populateClaudeSelects === 'function') populateClaudeSelects();
+  saveState();
+  toast(esNuevo
+    ? '🎒 Curso ' + a + ' creado. Los datos de cursos anteriores se conservan.'
+    : '📅 Curso ' + a + ' activo');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2337,7 +2425,21 @@ function selectCurso(cursoId) {
 
 
   // ── Tabla por materia ─────────────────────────────────────────
-  let tblHtml = `<div class="card"><div class="card-title">📊 Resultados por materia</div>
+  // Redondeo por "mayor resto": los % de cada materia suman exactamente 100
+  function pctRow(ms, gradesArr) {
+    const tot = gradesArr.reduce((a,g)=>a+(ms[g]||0),0);
+    if (!tot) return {};
+    const raw = gradesArr.map(g => ({ g, exact: (ms[g]||0)/tot*100 }));
+    const out = {};
+    let used = 0;
+    raw.forEach(r => { out[r.g] = Math.floor(r.exact); used += out[r.g]; });
+    // Reparte los puntos restantes a los mayores restos decimales
+    raw.sort((a,b)=>(b.exact-Math.floor(b.exact))-(a.exact-Math.floor(a.exact)));
+    for (let i=0; i<100-used; i++) out[raw[i % raw.length].g]++;
+    return out;
+  }
+
+  let tblHtml = `<div class="card"><div class="card-title">📊 Resultados por materia <span style="font-weight:400;font-size:11px;color:var(--gris)">(nº de alumnos y % sobre el total de la materia)</span></div>
     <div class="table-wrap"><table>
     <thead><tr><th>Materia</th>` + grades.map(g=>`<th>${g}</th>`).join('') +
     `<th>% Pos</th><th>Ranking</th></tr></thead><tbody>`;
@@ -2345,12 +2447,15 @@ function selectCurso(cursoId) {
   matsSorted.forEach((mat, rank) => {
     const ms = stats.matStats[mat] || {};
     const matTotal = Object.values(ms).reduce((a,b)=>a+b,0);
+    const rowPct = pctRow(ms, grades);
     const matPct = matPctMap[mat];
     const emoji = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : '';
     tblHtml += `<tr><td>${mat}</td>` +
       grades.map(g => {
         const v = ms[g]||0;
-        return v ? `<td><span class="pill g-${g}">${v}</span></td>` : '<td>—</td>';
+        if (!v) return '<td>—</td>';
+        return `<td style="white-space:nowrap"><span class="pill g-${g}">${v}</span>
+          <span style="font-size:10px;color:var(--gris);font-weight:700"> ${rowPct[g]||0}%</span></td>`;
       }).join('') +
       `<td style="font-weight:700;color:${matPct>=80?'var(--verdeM)':matPct>=60?'var(--ambar)':'var(--rojo)'}">${matPct}%</td>
        <td style="text-align:center">${emoji || '#'+(rank+1)}</td></tr>`;
@@ -2472,6 +2577,13 @@ function selectCurso(cursoId) {
         <div class="chart-wrap"><canvas id="c-bar-${cursoId}"></canvas></div></div>
     </div>
 
+    <!-- Fila 1b: % de cada calificación por materia (100%) -->
+    <div class="card">
+      <div class="card-title">💯 % de cada calificación por materia</div>
+      <div class="chart-wrap" style="height:${Math.max(220, c.mats.length*34)}px"><canvas id="c-pct-${cursoId}"></canvas></div>
+      <p style="font-size:11px;color:var(--gris);margin-top:6px">Cada barra suma 100%. Pasa el ratón/dedo por los tramos para ver el detalle (nº de alumnos y %).</p>
+    </div>
+
     <!-- Fila 2: % Positivos por materia + Radar -->
     <div class="chart-grid">
       <div class="chart-card"><div class="card-title">📈 % Positivos por materia (ranking)</div>
@@ -2580,6 +2692,52 @@ function renderCursoCharts(id, c, grades) {
         scales:{
           x:{stacked:true,ticks:{font:{size:10}}},
           y:{stacked:true,ticks:{stepSize:1},title:{display:true,text:'Nº alumnos',font:{size:10}}}
+        }
+      }
+    });
+  }
+
+  // ── 2b. Barras 100%: % de cada calificación por materia ──────
+  const pctEl = document.getElementById('c-pct-'+id);
+  if (pctEl) {
+    // Mismo redondeo por "mayor resto" que la tabla: cada barra suma 100 exacto
+    const matPcts = {};
+    c.mats.forEach(m => {
+      const ms = c.stats.matStats[m] || {};
+      const tot = grades.reduce((a,g)=>a+(ms[g]||0),0);
+      if (!tot) { matPcts[m] = {}; return; }
+      const raw = grades.map(g => ({ g, exact: (ms[g]||0)/tot*100 }));
+      const out = {}; let used = 0;
+      raw.forEach(r => { out[r.g] = Math.floor(r.exact); used += out[r.g]; });
+      raw.sort((a,b)=>(b.exact-Math.floor(b.exact))-(a.exact-Math.floor(a.exact)));
+      for (let i=0; i<100-used; i++) out[raw[i % raw.length].g]++;
+      matPcts[m] = out;
+    });
+    _charts['c-pct-'+id] = new Chart(pctEl, {
+      type:'bar',
+      data:{
+        labels: c.mats,
+        datasets: grades.map(g => ({
+          label: g,
+          data: c.mats.map(m => matPcts[m][g]||0),
+          backgroundColor: COLORS[g]||'#999',
+          borderRadius:2
+        }))
+      },
+      options:{
+        indexAxis:'y',
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},
+          tooltip:{callbacks:{label:ctx=>{
+            const mat = ctx.label, g = ctx.dataset.label;
+            const n = c.stats.matStats[mat]?.[g]||0;
+            return `${g}: ${n} alumno/s (${ctx.parsed.x}%)`;
+          }}}
+        },
+        scales:{
+          x:{stacked:true,min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10}}},
+          y:{stacked:true,ticks:{font:{size:11}}}
         }
       }
     });
@@ -3295,20 +3453,52 @@ function generateInformeTEA() {
 // COMPARATIVA TRIMESTRAL
 // ═══════════════════════════════════════════════════════════════
 function populateComparativaSelects() {
-  const trims = [1,2,3];
+  // Cursos/grupos con datos en CUALQUIER año académico y trimestre
   const courses = new Set();
-  trims.forEach(t => {
-    const d = getData(t);
-    Object.keys(d).forEach(id => courses.add(id));
+  Object.values(state.datos || {}).forEach(byTrim => {
+    Object.values(byTrim || {}).forEach(byCurso => {
+      Object.keys(byCurso || {}).forEach(id => courses.add(id));
+    });
+  });
+
+  // Orden según CURSOS_CONFIG si es posible
+  const order = Object.keys(CURSOS_CONFIG || {});
+  const sorted = [...courses].sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
   });
 
   const sel = document.getElementById('comp-curso-sel');
-  sel.innerHTML = [...courses].map(id =>
+  const prev = sel.value;
+  sel.innerHTML = sorted.map(id =>
     `<option value="${id}">${CURSOS_CONFIG[id]?.label||id}</option>`
   ).join('') || '<option value="">Sin datos</option>';
+  if (prev && sorted.includes(prev)) sel.value = prev;
+}
+
+function onCompModoChange() {
+  const modo = document.getElementById('comp-modo').value;
+  const trimWrap = document.getElementById('comp-trim-wrap');
+  const vista = document.getElementById('comp-vista');
+  const optAlumno = vista.querySelector('option[value="alumno"]');
+  if (modo === 'cursos') {
+    trimWrap.style.display = 'inline-flex';
+    if (optAlumno) optAlumno.disabled = true;
+    if (vista.value === 'alumno') vista.value = 'grupo';
+    // Por defecto, sugerir el trimestre activo
+    const ts = document.getElementById('comp-trim-sel');
+    if (ts && !ts.dataset.touched) ts.value = String(state.trimestre);
+  } else {
+    trimWrap.style.display = 'none';
+    if (optAlumno) optAlumno.disabled = false;
+  }
+  renderComparativa();
 }
 
 function renderComparativa() {
+  const modo = document.getElementById('comp-modo')?.value || 'trimestres';
+  if (modo === 'cursos') { renderComparativaAnyos(); return; }
+
   const cursoId = document.getElementById('comp-curso-sel').value;
   const vista = document.getElementById('comp-vista').value;
   if (!cursoId) return;
@@ -3335,6 +3525,373 @@ function renderComparativa() {
   if (vista === 'grupo') renderCompGrupo(cursoId, t1, t2, t3, grades, cfg);
   else if (vista === 'materia') renderCompMateria(cursoId, t1, t2, t3, grades, mats, cfg);
   else renderCompAlumno(cursoId, t1, t2, t3, grades, mats, cfg);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPARATIVA ENTRE CURSOS ACADÉMICOS (mismo trimestre, varios años)
+// ═══════════════════════════════════════════════════════════════
+const ANYO_PALETTE = [
+  {bg:'#1A237E', mid:'rgba(26,35,126,.75)',  soft:'rgba(26,35,126,.18)',  light:'#E8EAF6'},
+  {bg:'#1B5E20', mid:'rgba(27,94,32,.75)',   soft:'rgba(27,94,32,.18)',   light:'#E8F5E9'},
+  {bg:'#B71C1C', mid:'rgba(183,28,28,.75)',  soft:'rgba(183,28,28,.18)',  light:'#FFEBEE'},
+  {bg:'#E65100', mid:'rgba(230,81,0,.75)',   soft:'rgba(230,81,0,.18)',   light:'#FFF3E0'},
+  {bg:'#4A148C', mid:'rgba(74,20,140,.75)',  soft:'rgba(74,20,140,.18)',  light:'#F3E5F5'},
+  {bg:'#006064', mid:'rgba(0,96,100,.75)',   soft:'rgba(0,96,100,.18)',   light:'#E0F7FA'}
+];
+function anyoColor(i) { return ANYO_PALETTE[i % ANYO_PALETTE.length]; }
+function pctPos(t) { return t && t.stats && t.stats.total ? Math.round(t.stats.pos / t.stats.total * 100) : 0; }
+function pctNeg(t) { return t && t.stats && t.stats.total ? Math.round(t.stats.neg / t.stats.total * 100) : 0; }
+
+function destroyChartsPrefix(prefix) {
+  Object.keys(_charts).filter(k => k.startsWith(prefix)).forEach(k => {
+    try { _charts[k].destroy(); } catch(e) {}
+    delete _charts[k];
+  });
+}
+
+function renderComparativaAnyos() {
+  const cursoId = document.getElementById('comp-curso-sel').value;
+  const trim = parseInt(document.getElementById('comp-trim-sel').value, 10) || 1;
+  const vista = document.getElementById('comp-vista').value;
+  const content = document.getElementById('comp-content');
+  if (!cursoId) return;
+
+  // Años con datos de este curso en el trimestre elegido
+  const anyos = listAnyos().filter(a => getDataY(a, trim)[cursoId]);
+
+  if (anyos.length < 2) {
+    const total = listAnyos().length;
+    content.innerHTML = `<div class="empty"><div class="empty-ico">📅</div>
+      <h3>Necesitas el mismo trimestre en al menos 2 cursos académicos</h3>
+      <p>Ahora mismo hay <strong>${anyos.length}</strong> curso/s académico/s con datos del
+      <strong>${trim}.º trimestre</strong> para <strong>${CURSOS_CONFIG[cursoId]?.label||cursoId}</strong>
+      (de ${total} curso/s registrados).<br>
+      Cuando importes las notas del ${trim}.º trimestre del nuevo año, la comparativa aparecerá aquí automáticamente.</p></div>`;
+    return;
+  }
+
+  const data = anyos.map(a => getDataY(a, trim)[cursoId]);
+  const cfg = CURSOS_CONFIG[cursoId] || { label: cursoId };
+  const ref = data[data.length - 1];
+  const grades = gradeList(ref.tipo);
+  // Unión de materias de todos los años (por si cambian de un curso a otro)
+  const matsSet = new Set();
+  data.forEach(t => (t.mats || []).forEach(m => matsSet.add(m)));
+  const mats = [...matsSet];
+
+  if (vista === 'materia') renderCompAnyosMateria(cursoId, anyos, data, trim, grades, mats, cfg);
+  else renderCompAnyosGrupo(cursoId, anyos, data, trim, grades, cfg);
+}
+
+function renderCompAnyosGrupo(id, anyos, data, trim, grades, cfg) {
+  const content = document.getElementById('comp-content');
+  const tName = (typeof TRIM_NAMES !== 'undefined' && TRIM_NAMES[trim]) ? TRIM_NAMES[trim] : trim + '.º trimestre';
+
+  const donaIds = anyos.map((_, i) => `ca-dona-${i}`);
+  const donasHtml = anyos.map((a, i) => `
+    <div class="chart-card" style="flex:1;min-width:170px;max-width:260px">
+      <div class="card-title" style="background:${anyoColor(i).bg};color:#fff;margin:-16px -16px 12px;padding:8px 12px;border-radius:var(--r) var(--r) 0 0">
+        📅 ${a}
+      </div>
+      <div class="chart-wrap" style="height:160px"><canvas id="${donaIds[i]}"></canvas></div>
+      <div id="ca-dona-leg-${i}" style="font-size:11px;margin-top:6px;line-height:1.7;text-align:center"></div>
+    </div>`).join('');
+
+  content.innerHTML = `
+    <div class="card">
+      <div class="card-title">📈 ${tName} · % positivos y negativos por curso académico — ${cfg.label}</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="ca-line"></canvas></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">${donasHtml}</div>
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">📊 Distribución de calificaciones por curso académico</div>
+        <div style="height:280px;position:relative"><canvas id="ca-dist"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">🗓️ % positivos por trimestre y curso académico</div>
+        <div style="height:280px;position:relative"><canvas id="ca-alltrim"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Tabla comparativa entre cursos académicos · ${tName}</div>
+      <div class="table-wrap" id="ca-table"></div>
+    </div>`;
+
+  destroyChartsPrefix('ca-');
+
+  setTimeout(() => {
+    // 1. Línea evolución interanual
+    const lineEl = document.getElementById('ca-line');
+    if (lineEl) {
+      _charts['ca-line'] = new Chart(lineEl, {
+        type: 'line',
+        data: {
+          labels: anyos,
+          datasets: [{
+            label: '% Positivos',
+            data: data.map(pctPos),
+            borderColor: '#2E7D32', backgroundColor: 'rgba(46,125,50,.15)',
+            fill: true, tension: .35, pointRadius: 7, pointBackgroundColor: '#2E7D32'
+          }, {
+            label: '% Negativos',
+            data: data.map(pctNeg),
+            borderColor: '#C62828', backgroundColor: 'rgba(198,40,40,.1)',
+            fill: true, tension: .35, pointRadius: 7, pointBackgroundColor: '#C62828'
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' },
+            tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}%` } }
+          },
+          scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } } }
+        }
+      });
+    }
+
+    // 2. Donuts por año
+    data.forEach((t, i) => {
+      const el = document.getElementById(donaIds[i]);
+      if (!el) return;
+      const pos = pctPos(t), neg = pctNeg(t);
+      const neu = Math.max(0, 100 - pos - neg);
+      const hasNeu = neu > 0;
+      const pieData   = hasNeu ? [pos, neu, neg] : [pos, neg];
+      const pieLabels = hasNeu
+        ? [`✅ Aprobados ${pos}%`, `🟡 Suficiente/Bien ${neu}%`, `❌ Suspensos ${neg}%`]
+        : [`✅ Aprobados ${pos}%`, `❌ Suspensos ${neg}%`];
+      const pieColors = hasNeu ? ['#2E7D32','#F57F17','#C62828'] : ['#2E7D32','#C62828'];
+      _charts[donaIds[i]] = new Chart(el, {
+        type: 'doughnut',
+        data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors, borderWidth: 2, borderColor: '#fff' }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '55%',
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.label } } }
+        }
+      });
+      const legEl = document.getElementById('ca-dona-leg-' + i);
+      if (legEl) legEl.innerHTML = pieLabels.map((l, j) =>
+        `<span style="color:${pieColors[j]};font-weight:700">${l}</span>`).join('<br>');
+    });
+
+    // 3. Distribución de calificaciones (barras agrupadas, un dataset por año)
+    const distEl = document.getElementById('ca-dist');
+    if (distEl) {
+      _charts['ca-dist'] = new Chart(distEl, {
+        type: 'bar',
+        data: {
+          labels: grades,
+          datasets: anyos.map((a, i) => ({
+            label: a,
+            data: grades.map(g => data[i].stats.counts[g] || 0),
+            backgroundColor: anyoColor(i).mid,
+            borderColor: anyoColor(i).bg, borderWidth: 2, borderRadius: 5
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top' } },
+          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+        }
+      });
+    }
+
+    // 4. % positivos por trimestre y año (visión global del grupo)
+    const allEl = document.getElementById('ca-alltrim');
+    if (allEl) {
+      _charts['ca-alltrim'] = new Chart(allEl, {
+        type: 'bar',
+        data: {
+          labels: ['1T', '2T', '3T'],
+          datasets: anyos.map((a, i) => ({
+            label: a,
+            data: [1, 2, 3].map(t => {
+              const d = getDataY(a, t)[id];
+              return d ? pctPos(d) : null;
+            }),
+            backgroundColor: anyoColor(i).mid,
+            borderColor: anyoColor(i).bg, borderWidth: 2, borderRadius: 5
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: { callbacks: { label: c => c.parsed.y === null ? `${c.dataset.label}: sin datos` : `${c.dataset.label}: ${c.parsed.y}%` } }
+          },
+          scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } } }
+        }
+      });
+    }
+
+    // 5. Tabla comparativa
+    let html = `<table class="evol-table"><thead><tr><th>Calificación</th>` +
+      anyos.map((a, i) => `<th style="background:${anyoColor(i).bg};color:#fff">${a}</th>`).join('') +
+      `<th>Tendencia</th></tr></thead><tbody>`;
+    grades.forEach(g => {
+      html += `<tr><td><span class="pill g-${g}">${g}</span></td>`;
+      const vals = data.map(t => t.stats.counts[g] || 0);
+      vals.forEach((v, i) => html += `<td style="background:${anyoColor(i).light}">${v}</td>`);
+      const trend = vals[vals.length - 1] - vals[0];
+      const trendCls = trend > 0 ? 'mejora' : trend < 0 ? 'empeora' : 'igual';
+      html += `<td class="${trendCls}">${trend > 0 ? '↑' + trend : trend < 0 ? '↓' + Math.abs(trend) : '→'}</td></tr>`;
+    });
+    html += `<tr style="font-weight:700;border-top:2px solid #ccc"><td>% Positivos</td>`;
+    data.forEach((t, i) => {
+      const pct = pctPos(t);
+      html += `<td style="background:${anyoColor(i).light};color:${pct >= 80 ? 'var(--verdeM)' : 'var(--rojo)'}">${pct}%</td>`;
+    });
+    const dPct = pctPos(data[data.length - 1]) - pctPos(data[0]);
+    html += `<td class="${dPct > 0 ? 'mejora' : dPct < 0 ? 'empeora' : 'igual'}">${dPct > 0 ? '↑+' + dPct + '%' : dPct < 0 ? '↓' + dPct + '%' : '→'}</td></tr>`;
+    html += `<tr><td>Nº alumnos</td>`;
+    data.forEach((t, i) => html += `<td style="background:${anyoColor(i).light}">${(t.alumnos || []).length}</td>`);
+    html += `<td></td></tr></tbody></table>
+      <p style="font-size:11px;color:var(--gris);margin-top:8px">⚠️ Recuerda: el alumnado del grupo cambia de un curso académico a otro; la comparativa refleja resultados del grupo, no de los mismos alumnos.</p>`;
+    document.getElementById('ca-table').innerHTML = html;
+  }, 50);
+}
+
+function renderCompAnyosMateria(id, anyos, data, trim, grades, mats, cfg) {
+  const content = document.getElementById('comp-content');
+  const tName = (typeof TRIM_NAMES !== 'undefined' && TRIM_NAMES[trim]) ? TRIM_NAMES[trim] : trim + '.º trimestre';
+
+  function matPctY(t, mat) {
+    if (!t) return null;
+    const ms = (t.stats.matStats || {})[mat];
+    if (!ms) return null;
+    const tot = Object.values(ms).reduce((a, b) => a + b, 0);
+    const pos = (t.stats.posGrades || []).reduce((a, g) => a + (ms[g] || 0), 0);
+    return tot ? Math.round(pos / tot * 100) : 0;
+  }
+
+  const first = data[0], last = data[data.length - 1];
+
+  // Ranking de variación (último año vs primero)
+  const diffs = mats.map(m => {
+    const a = matPctY(first, m), b = matPctY(last, m);
+    return { mat: m, diff: (a === null || b === null) ? null : b - a };
+  }).sort((x, y) => (y.diff ?? -999) - (x.diff ?? -999));
+
+  content.innerHTML = `
+    <div class="chart-grid" style="margin-bottom:16px">
+      <div class="chart-card">
+        <div class="card-title">📊 % positivos por materia y curso académico · ${tName} — ${cfg.label}</div>
+        <div style="height:300px;position:relative"><canvas id="ca-mat-grp"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="card-title">🕸️ Radar de materias por curso académico</div>
+        <div style="height:300px;position:relative"><canvas id="ca-mat-radar"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">📈 Variación por materia (${anyos[0]} → ${anyos[anyos.length-1]})</div>
+      <div style="height:${Math.max(180, mats.length * 38)}px;position:relative"><canvas id="ca-mat-rank"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Tabla · % positivos por materia y curso académico</div>
+      <div class="table-wrap" id="ca-mat-table"></div>
+    </div>`;
+
+  destroyChartsPrefix('ca-');
+
+  setTimeout(() => {
+    // 1. Barras agrupadas
+    const el1 = document.getElementById('ca-mat-grp');
+    if (el1) _charts['ca-mat-grp'] = new Chart(el1, {
+      type: 'bar',
+      data: {
+        labels: mats,
+        datasets: anyos.map((a, i) => ({
+          label: a,
+          data: mats.map(m => matPctY(data[i], m)),
+          backgroundColor: anyoColor(i).mid,
+          borderColor: anyoColor(i).bg, borderWidth: 2, borderRadius: 5
+        }))
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: { callbacks: { label: c => c.parsed.y === null ? `${c.dataset.label}: sin datos` : `${c.dataset.label}: ${c.parsed.y}%` } }
+        },
+        scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { ticks: { font: { size: 10 } } } }
+      }
+    });
+
+    // 2. Radar
+    const el2 = document.getElementById('ca-mat-radar');
+    if (el2) _charts['ca-mat-radar'] = new Chart(el2, {
+      type: 'radar',
+      data: {
+        labels: mats,
+        datasets: anyos.map((a, i) => ({
+          label: a,
+          data: mats.map(m => matPctY(data[i], m)),
+          borderColor: anyoColor(i).bg,
+          backgroundColor: anyoColor(i).soft,
+          pointBackgroundColor: anyoColor(i).bg, pointRadius: 4, borderWidth: 2.5
+        }))
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+        scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, font: { size: 9 }, backdropColor: 'transparent' },
+          pointLabels: { font: { size: mats.length > 6 ? 8 : 10 } }, grid: { color: 'rgba(0,0,0,.08)' } } }
+      }
+    });
+
+    // 3. Ranking de variación
+    const el3 = document.getElementById('ca-mat-rank');
+    if (el3) {
+      const lbls = diffs.map(d => d.mat);
+      const vals = diffs.map(d => d.diff ?? 0);
+      _charts['ca-mat-rank'] = new Chart(el3, {
+        type: 'bar',
+        data: {
+          labels: lbls,
+          datasets: [{
+            label: 'Variación % positivos',
+            data: vals,
+            backgroundColor: vals.map(d => d > 5 ? 'rgba(46,125,50,.8)' : d < -5 ? 'rgba(198,40,40,.8)' : 'rgba(144,164,174,.8)'),
+            borderColor: vals.map(d => d > 5 ? '#1B5E20' : d < -5 ? '#B71C1C' : '#607D8B'),
+            borderWidth: 2, borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: c => { const v = c.parsed.x; return `${v > 0 ? '+' : ''}${v} puntos porcentuales`; } } } },
+          scales: { x: { ticks: { callback: v => `${v > 0 ? '+' : ''}${v}%` }, grid: { color: 'rgba(0,0,0,.05)' } },
+            y: { ticks: { font: { size: 11 } } } }
+        }
+      });
+    }
+
+    // 4. Tabla
+    let html = `<table class="evol-table"><thead><tr><th>Materia</th>` +
+      anyos.map((a, i) => `<th style="background:${anyoColor(i).bg};color:#fff">${a}</th>`).join('') +
+      `<th>Tendencia</th></tr></thead><tbody>`;
+    mats.forEach(m => {
+      html += `<tr><td style="font-weight:700">${m}</td>`;
+      const vals = data.map(t => matPctY(t, m));
+      vals.forEach((v, i) => {
+        const clr = v === null ? 'var(--gris)' : v >= 80 ? 'var(--verdeM)' : v >= 60 ? '#F57F17' : 'var(--rojo)';
+        html += `<td style="background:${anyoColor(i).light};color:${clr};font-weight:700">${v === null ? '—' : v + '%'}</td>`;
+      });
+      const a0 = vals[0], a1 = vals[vals.length - 1];
+      if (a0 === null || a1 === null) html += `<td>—</td>`;
+      else {
+        const d = a1 - a0;
+        html += `<td class="${d > 0 ? 'mejora' : d < 0 ? 'empeora' : 'igual'}">${d > 0 ? '↑+' + d + '%' : d < 0 ? '↓' + d + '%' : '→'}</td>`;
+      }
+      html += `</tr>`;
+    });
+    html += `</tbody></table>
+      <p style="font-size:11px;color:var(--gris);margin-top:8px">⚠️ Comparativa de grupo entre promociones distintas (${tName}). Las celdas con "—" indican que esa materia no existe en ese curso académico.</p>`;
+    document.getElementById('ca-mat-table').innerHTML = html;
+  }, 50);
 }
 
 function renderCompGrupo(id, t1, t2, t3, grades, cfg) {
@@ -4451,7 +5008,8 @@ function useLocalOnly() {
 }
 
 async function saveSettings() {
-  state.anyo = document.getElementById('cfg-anyo').value || '2025/2026';
+  const nuevoAnyo = document.getElementById('cfg-anyo').value || '2025/2026';
+  if (nuevoAnyo !== state.anyo) setAnyo(nuevoAnyo);
   const newTrim = parseInt(document.getElementById('cfg-trim').value);
   if (newTrim !== state.trimestre) setTrimestre(newTrim);
 
