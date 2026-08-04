@@ -3867,9 +3867,7 @@ function downloadPlanWord() {
     <style>body{font-family:'Calibri',sans-serif;font-size:11pt;line-height:1.4}
     h1{font-size:18pt}h2{font-size:13pt;margin-top:18pt}
     table{font-size:10pt}th{text-align:left}</style></head>
-    <body>${body}  <!-- Publicador de resultados en la web del colegio -->
-  <script src="publicar-web.js"></script>
-</body></html>`;
+    <body>${body}</body></html>`;
 
   const blob = new Blob(['\ufeff' + doc], { type: 'application/msword' });
   const a = document.createElement('a');
@@ -5629,5 +5627,7 @@ function installPWA() {
 }
 </script>
 
+  <!-- Publicador de resultados en la web del colegio -->
+  <script src="publicar-web.js"></script>
 </body>
 </html>
