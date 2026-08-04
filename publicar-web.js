@@ -50,13 +50,44 @@
   };
   var NEGATIVAS = { primaria: ['IN'], infantil: ['NAD'] };
 
+  /* ---------- Acceso al estado de la app ----------
+     OJO: la app declara `let state`, y las variables declaradas con
+     let/const NO quedan colgadas de window. Hay que leerlas por su
+     nombre, que sí es accesible entre scripts del mismo documento. */
+  function getState() {
+    try { if (typeof state !== 'undefined' && state) return state; } catch (e) {}
+    if (window.state) return window.state;
+    return null;
+  }
+
+  /* Busca el trimestre tolerando que la clave sea número o texto */
+  function ramaTrimestre(datosAnyo, trim) {
+    if (!datosAnyo) return null;
+    if (datosAnyo[trim]) return datosAnyo[trim];
+    if (datosAnyo[String(trim)]) return datosAnyo[String(trim)];
+    if (datosAnyo[Number(trim)]) return datosAnyo[Number(trim)];
+    return null;
+  }
+
   /* ---------- Cálculo ---------- */
   function calcular() {
-    var st = window.state;
-    if (!st || !st.datos) return null;
+    var st = getState();
+    if (!st) { calcular.motivo = 'No se ha podido leer el estado de la app.'; return null; }
+    if (!st.datos) { calcular.motivo = 'La app no tiene datos cargados.'; return null; }
 
     var anyo = st.anyo, trim = st.trimestre;
-    var cursos = (st.datos[anyo] || {})[trim] || {};
+    var datosAnyo = st.datos[anyo];
+    if (!datosAnyo) {
+      calcular.motivo = 'No hay datos del curso ' + anyo + '. Cursos disponibles: ' +
+        (Object.keys(st.datos).join(', ') || 'ninguno') + '.';
+      return null;
+    }
+    var cursos = ramaTrimestre(datosAnyo, trim);
+    if (!cursos) {
+      calcular.motivo = 'No hay datos del trimestre ' + trim + '. Trimestres con datos: ' +
+        (Object.keys(datosAnyo).join(', ') || 'ninguno') + '.';
+      return null;
+    }
 
     var total = 0, positivas = 0;
     var dist = { SB: 0, NT: 0, BI: 0, SU: 0, IN: 0, EXC: 0, BUE: 0, ADE: 0, NAD: 0 };
@@ -107,7 +138,11 @@
       });
     });
 
-    if (!total) return null;
+    if (!total) {
+      calcular.motivo = 'Se han encontrado ' + gruposUsados + ' grupos, pero ninguna calificación ' +
+        'contabilizable. Recuerda que se excluyen el Aula TEA, Religión y Atención Educativa.';
+      return null;
+    }
 
     var pct = function (a, b) { return b ? Math.round(a * 1000 / b) / 10 : 0; };
 
@@ -167,7 +202,10 @@
 
   function abrir() {
     var d = calcular();
-    if (!d) { alert('No hay datos suficientes en el trimestre activo para publicar.'); return; }
+    if (!d) {
+      alert('No se puede publicar todavía.\n\n' + (calcular.motivo || 'No hay datos en el trimestre activo.'));
+      return;
+    }
 
     estilos();
     var ov = document.createElement('div');
