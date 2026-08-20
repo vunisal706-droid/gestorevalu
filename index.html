@@ -63,6 +63,7 @@
 <!-- Firebase SDK (compat - works everywhere) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script>
   try {
     const firebaseConfig = {
@@ -77,8 +78,14 @@
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    window._auth = firebase.auth();
+    // La sesion dura solo mientras la pestana este abierta
+    window._auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(function(e){
+      console.warn('No se pudo fijar la persistencia de sesion:', e.message);
+    });
     window._db = db;
     window._firebase = db;
+    window._fbConfig = firebaseConfig;
     // Realtime Database API wrappers
     window._saveDoc = (col, id, data) => db.ref(col + '/' + id).set(data);
     window._getDoc  = (col, id) => db.ref(col + '/' + id).get();
@@ -479,6 +486,17 @@ body{
 .login-error{background:#FFEBEE;color:#C62828;border-radius:8px;
   padding:10px 14px;font-size:13px;margin-top:12px;display:none;font-weight:600}
 .login-error.show{display:block}
+.login-select{width:100%;padding:11px 14px;border:2px solid var(--grisC);
+  border-radius:10px;font-size:15px;font-family:'DM Sans',sans-serif;
+  outline:none;transition:border .2s;margin-bottom:16px;background:#fff;
+  color:#263238;appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23455A64'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;background-size:22px}
+.login-select:focus{border-color:var(--azulM)}
+.login-hint{font-size:11.5px;color:var(--gris);margin:-8px 0 16px;line-height:1.5}
+.login-offline{background:#FFF8E1;color:#5c4400;border-radius:8px;
+  padding:9px 12px;font-size:12px;margin-bottom:14px;font-weight:600;display:none}
+.login-offline.show{display:block}
 /* logout button in topbar */
 #logoutBtn{background:rgba(255,80,80,.25);border:1px solid rgba(255,80,80,.5);
   color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;
@@ -523,13 +541,18 @@ if ('serviceWorker' in navigator) {
   <div class="login-box">
     <img class="login-logo" src="data:image/jpeg;base64,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" alt="Logo" onerror="this.style.display='none'">
     <div class="login-title">CEIP Capitulaciones</div>
-    <div class="login-sub">Acceso restringido — Introduce tu contraseña</div>
-    <label class="login-label" for="loginPass">Contraseña</label>
+    <div class="login-sub">Acceso restringido al profesorado del centro</div>
+    <div class="login-offline" id="loginOffline">Sin conexion con Firebase. Se entrara en modo local: podras consultar los datos guardados en este dispositivo, pero no sincronizar.</div>
+    <label class="login-label" for="loginUser">Profesor/a</label>
+    <select class="login-select" id="loginUser"></select>
+    <label class="login-label" for="loginPass">Usuario IdEA</label>
     <input class="login-input" type="password" id="loginPass"
-      placeholder="Contraseña…"
+      placeholder="Tu usuario IdEA de Seneca"
+      autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
       onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" onclick="doLogin()">🔐 Entrar</button>
-    <div class="login-error" id="loginError">Contraseña incorrecta. Inténtalo de nuevo.</div>
+    <div class="login-hint">Selecciona tu nombre e introduce tu usuario IdEA de Seneca.</div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Entrar</button>
+    <div class="login-error" id="loginError">Datos incorrectos. Revisa tu usuario IdEA.</div>
   </div>
 </div>
 
@@ -1001,6 +1024,50 @@ if ('serviceWorker' in navigator) {
 </main>
 
 <!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="profeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>👥 Profesorado con acceso</h3>
+      <button class="modal-close" onclick="closeModal('profeModal')" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div style="background:var(--azulC);border-radius:10px;padding:12px 14px;
+                  font-size:.78rem;color:var(--azul);line-height:1.6;margin-bottom:16px;">
+        Al dar de alta se crea la cuenta y se concede el acceso en un solo paso.
+        Al dar de baja, la persona pierde el permiso de escritura de inmediato.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="np-nombre">Nombre y apellidos</label>
+        <input class="form-input" id="np-nombre" placeholder="Apellidos, Nombre" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="np-idea">Usuario IdEA</label>
+        <input class="form-input" id="np-idea" placeholder="Ej. abcdef123"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="np-rol">Perfil</label>
+        <select class="form-select" id="np-rol">
+          <option value="profesorado">Profesorado — sin Importar ni Ajustes</option>
+          <option value="super">Superusuario — acceso completo</option>
+        </select>
+      </div>
+      <button class="btn btn-green btn-sm" id="np-btn" onclick="altaDocente()">➕ Dar de alta</button>
+
+      <hr style="margin:18px 0;border-color:var(--grisC)">
+      <div style="font-size:.8rem;font-weight:700;color:var(--gris);margin-bottom:8px;">
+        Con acceso ahora mismo (<span id="np-total">0</span>)
+      </div>
+      <div id="np-lista"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('profeModal')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="settingsModal">
   <div class="modal">
     <div class="modal-header">
@@ -1027,12 +1094,14 @@ if ('serviceWorker' in navigator) {
       <input type="hidden" id="scfg-appId" value="1:1057770341975:web:9320daeca26839753a4512">
       <hr style="margin:16px 0;border-color:var(--grisC)">
       <div class="form-group">
-        <label class="form-label">🔐 Cambiar contraseñas</label>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
-          <input class="form-input" type="password" id="cfg-pwd-prof" placeholder="Nueva contraseña profesorado (dejar vacío = sin cambio)">
-          <input class="form-input" type="password" id="cfg-pwd-super" placeholder="Nueva contraseña superusuario (dejar vacío = sin cambio)">
+        <label class="form-label">🔐 Acceso</label>
+        <div style="font-size:.78rem;color:var(--gris);margin:6px 0 10px;line-height:1.6;">
+          Cada docente entra seleccionando su nombre e introduciendo su usuario IdEA.
+          Desde aquí puedes dar de alta o de baja al profesorado sin tocar el código.
         </div>
-        <div style="font-size:.75rem;color:var(--grisB);margin-top:6px;font-weight:600;">Se guardan cifradas en Firebase. Mínimo 6 caracteres.</div>
+        <button class="btn btn-blue btn-sm" onclick="abrirGestionProfesorado()">
+          👥 Gestionar profesorado
+        </button>
       </div>
         <button class="btn btn-red btn-sm" onclick="confirmClearData()">
           🗑️ Borrar todos los datos del trimestre activo
@@ -5451,16 +5520,8 @@ async function saveSettings() {
     localStorage.setItem('cap_firebase', JSON.stringify({apiKey,projectId,appId}));
   }
 
-  // Cambio de contraseñas
-  const newProf  = document.getElementById('cfg-pwd-prof').value.trim();
-  const newSuper = document.getElementById('cfg-pwd-super').value.trim();
-  if (newProf && newProf.length < 6)  { toast('❌ Contraseña profesorado: mínimo 6 caracteres', true); return; }
-  if (newSuper && newSuper.length < 6){ toast('❌ Contraseña superusuario: mínimo 6 caracteres', true); return; }
-  if (newProf)  await saveAuthHash('profesoradoHash', newProf);
-  if (newSuper) await saveAuthHash('superHash', newSuper);
-  if (newProf || newSuper) toast('🔐 Contraseñas actualizadas en Firebase');
-  document.getElementById('cfg-pwd-prof').value  = '';
-  document.getElementById('cfg-pwd-super').value = '';
+  // Las contraseñas ya no se gestionan aquí: cada docente entra con su
+  // usuario IdEA y las cuentas viven en Firebase Authentication.
 
   saveState();
   closeModal('settingsModal');
@@ -5489,110 +5550,301 @@ document.getElementById('cl-tipo').addEventListener('change', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// SISTEMA DE LOGIN — contraseñas en Firebase Realtime Database
-// Nodo: /cv_auth  { superHash, profesoradoHash }
-// Los hashes son SHA-256. NUNCA se guardan contraseñas en texto
-// plano en el código fuente, en GitHub ni en localStorage.
-// Fallback offline: contraseñas por defecto (tigre / claustro26)
+// SISTEMA DE LOGIN — Firebase Authentication + listado en la base
+// ---------------------------------------------------------------
+// El listado vive en el nodo  /profesorado/{uid} = { nombre, rol }
+// Se gestiona desde la propia app (Ajustes -> Gestionar profesorado)
+// y solo el superusuario puede modificarlo.
+//
+// Cada docente entra seleccionando su nombre e introduciendo su
+// usuario IdEA, que es la contrasena de su cuenta de Firebase
+// (<idea>@capitulaciones.local). El IdEA NO se guarda en ningun
+// sitio: se comprueba contra Firebase y se descarta.
+//
+// Dar de baja a alguien borra su nodo, y las reglas de la base de
+// datos le retiran el permiso de escritura en ese mismo instante.
 // ═══════════════════════════════════════════════════════════════
 
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
+const AUTH_DOMINIO = '@capitulaciones.local';
+const RUTA_PROFES  = 'profesorado';
 
-let _authHashes = { superHash: '', profesoradoHash: '' };
-let _authLoaded = false;
+let PROFESORADO = [];     // [{ uid, nombre, rol }]
+let currentRol   = null;  // null | 'super' | 'profesorado'
+let currentUser  = null;
+let _modoLocal   = false;
 
-async function loadAuthHashes() {
-  // Fallback por defecto (funciona offline o si Firebase falla)
-  const sh = await sha256('tigre');
-  const ph = await sha256('claustro26');
-  _authHashes = { superHash: sh, profesoradoHash: ph };
-
-  if (!window._firebaseReady || !window._db) { _authLoaded = true; return; }
+/* ---------- Cargar el listado (antes de entrar) ---------- */
+async function cargarProfesorado() {
+  if (!window._firebaseReady || !window._db) return [];
   try {
-    const snap = await window._db.ref('cv_auth').get();
-    if (snap.exists()) {
-      const d = snap.val();
-      _authHashes.superHash       = d.superHash       || sh;
-      _authHashes.profesoradoHash = d.profesoradoHash || ph;
-    } else {
-      // Primera vez: crear nodo con contraseñas por defecto
-      await window._db.ref('cv_auth').set({ superHash: sh, profesoradoHash: ph });
-      console.log('✅ Nodo cv_auth creado en Realtime Database');
-    }
-  } catch(e) {
-    console.warn('No se pudo leer auth de Firebase, usando fallback:', e.message);
-  }
-  _authLoaded = true;
-}
-
-async function saveAuthHash(field, newPwd) {
-  const h = await sha256(newPwd);
-  _authHashes[field] = h;
-  if (window._firebaseReady && window._db) {
-    await window._db.ref('cv_auth/' + field).set(h);
+    const snap = await window._db.ref(RUTA_PROFES).get();
+    if (!snap.exists()) return [];
+    const v = snap.val();
+    return Object.keys(v).map(function (uid) {
+      return { uid: uid, nombre: v[uid].nombre || '(sin nombre)', rol: v[uid].rol || 'profesorado' };
+    }).sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+  } catch (e) {
+    console.warn('No se pudo leer el profesorado:', e.message);
+    return [];
   }
 }
 
-// Rol activo: null = no autenticado, 'super' o 'profesorado'
-let currentRol = null;
-
-async function buildAuthMap() {
-  // Compatibilidad con código existente que llama buildAuthMap()
-  return {
-    [_authHashes.superHash]:       'super',
-    [_authHashes.profesoradoHash]: 'profesorado'
-  };
+function poblarSelectProfesorado() {
+  const sel = document.getElementById('loginUser');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Selecciona tu nombre —</option>' +
+    PROFESORADO.map(function (p) {
+      return '<option value="' + p.uid + '">' + p.nombre + '</option>';
+    }).join('');
+  try {
+    const ult = localStorage.getItem('capi_ultimo_uid');
+    if (ult && PROFESORADO.some(function (p) { return p.uid === ult; })) sel.value = ult;
+  } catch (e) {}
 }
 
+/* ---------- Entrar ---------- */
 async function doLogin() {
-  const pwd = document.getElementById('loginPass').value;
-  const err = document.getElementById('loginError');
-  if (!_authLoaded) { err.textContent = 'Cargando...'; err.classList.add('show'); return; }
-  const hex = await sha256(pwd);
-  let rol = null;
-  if (hex === _authHashes.superHash)       rol = 'super';
-  else if (hex === _authHashes.profesoradoHash) rol = 'profesorado';
+  const sel  = document.getElementById('loginUser');
+  const pass = document.getElementById('loginPass');
+  const err  = document.getElementById('loginError');
+  const btn  = document.getElementById('loginBtn');
 
-  if (rol) {
-    currentRol = rol;
-    err.classList.remove('show');
-    document.getElementById('loginScreen').classList.remove('active');
-    document.getElementById('loginPass').value = '';
-    applyRolUI();
-    init();
-  } else {
-    err.classList.add('show');
-    document.getElementById('loginPass').select();
+  function fallo(msg) {
+    err.textContent = msg; err.classList.add('show');
+    if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+    pass.select();
   }
+
+  const uidSel  = sel.value;
+  const escrito = pass.value.trim();
+  if (!uidSel)  { fallo('Selecciona tu nombre en la lista.'); return; }
+  if (!escrito) { fallo('Escribe tu usuario IdEA.'); return; }
+
+  const ficha = PROFESORADO.find(function (p) { return p.uid === uidSel; });
+  if (!ficha) { fallo('Ese nombre ya no está en el listado.'); return; }
+
+  err.classList.remove('show');
+  if (btn) { btn.disabled = true; btn.textContent = 'Comprobando…'; }
+
+  if (!window._firebaseReady || !window._auth) {
+    fallo('Sin conexión con Firebase. No se puede verificar el acceso.');
+    return;
+  }
+
+  const email = escrito.toLowerCase() + AUTH_DOMINIO;
+  try {
+    const cred = await window._auth.signInWithEmailAndPassword(email, escrito);
+    if (cred.user.uid !== ficha.uid) {
+      await window._auth.signOut();
+      fallo('Ese usuario IdEA no corresponde al nombre seleccionado.');
+      return;
+    }
+    entrar(ficha);
+  } catch (e) {
+    console.warn('Login rechazado:', e.code);
+    if (e.code === 'auth/network-request-failed')   fallo('Sin conexión. Inténtalo de nuevo.');
+    else if (e.code === 'auth/too-many-requests')   fallo('Demasiados intentos. Espera unos minutos.');
+    else if (e.code === 'auth/user-not-found')      fallo('Tu cuenta no está dada de alta. Avisa a la dirección.');
+    else                                            fallo('El usuario IdEA no es correcto.');
+  }
+}
+
+function entrar(ficha) {
+  currentUser = ficha;
+  currentRol  = ficha.rol === 'super' ? 'super' : 'profesorado';
+  _modoLocal  = false;
+  try { localStorage.setItem('capi_ultimo_uid', ficha.uid); } catch (e) {}
+
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').classList.remove('show');
+  document.getElementById('loginScreen').classList.remove('active');
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+
+  applyRolUI();
+  init();
+  if (typeof toast === 'function') toast('Sesión iniciada: ' + ficha.nombre.split(',')[0]);
 }
 
 function doLogout() {
-  currentRol = null;
-  document.getElementById('loginScreen').classList.add('active');
+  if (window._auth) window._auth.signOut().catch(function () {});
+  currentRol = null; currentUser = null;
   document.getElementById('loginPass').value = '';
   document.getElementById('loginError').classList.remove('show');
+  document.getElementById('loginScreen').classList.add('active');
 }
 
 function applyRolUI() {
-  const esProfesado = currentRol === 'profesorado';
-  // Ocultar pestaña Importar y botón Ajustes para profesorado
+  const esProf = currentRol === 'profesorado';
   const tabImportar = document.getElementById('tab-importar');
   const btnAjustes  = document.getElementById('btnAjustes');
-  if (tabImportar) tabImportar.style.display = esProfesado ? 'none' : '';
-  if (btnAjustes)  btnAjustes.style.display  = esProfesado ? 'none' : '';
+  if (tabImportar) tabImportar.style.display = esProf ? 'none' : '';
+  if (btnAjustes)  btnAjustes.style.display  = esProf ? 'none' : '';
 }
 
-// Cargar hashes al arrancar
-window.addEventListener('load', () => {
-  // Esperar a que Firebase esté listo si aún no lo está
-  if (window._firebaseReady !== undefined) {
-    loadAuthHashes();
-  } else {
-    document.addEventListener('firebase-ready', () => loadAuthHashes());
+/* ═══════════════════════════════════════════════════════════════
+   PANEL DE GESTION DEL PROFESORADO (solo superusuario)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Instancia secundaria: crear una cuenta con la instancia principal
+   cerraria la sesion del superusuario. Con una aparte, no. */
+function _appAlta() {
+  const existente = firebase.apps.filter(function (a) { return a.name === 'alta'; })[0];
+  return existente || firebase.initializeApp(window._fbConfig, 'alta');
+}
+
+async function abrirGestionProfesorado() {
+  if (currentRol !== 'super') {
+    toast('⛔ Solo el superusuario puede gestionar el profesorado', true);
+    return;
   }
+  showModal('profeModal');
+  await refrescarListaProfes();
+}
+
+async function refrescarListaProfes() {
+  PROFESORADO = await cargarProfesorado();
+  const cont = document.getElementById('np-lista');
+  document.getElementById('np-total').textContent = PROFESORADO.length;
+  if (!cont) return;
+
+  if (!PROFESORADO.length) {
+    cont.innerHTML = '<div style="font-size:.82rem;color:var(--gris);padding:10px 0;">' +
+      'Todavía no hay nadie dado de alta.</div>';
+    return;
+  }
+
+  cont.innerHTML = PROFESORADO.map(function (p) {
+    const esYo   = currentUser && p.uid === currentUser.uid;
+    const badge  = p.rol === 'super'
+      ? '<span style="background:var(--ambarC);color:#8a5a00;padding:2px 9px;border-radius:20px;font-size:.68rem;font-weight:700;">SUPER</span>'
+      : '';
+    const acciones = esYo
+      ? '<span style="font-size:.7rem;color:var(--gris);font-weight:600;">tu cuenta</span>'
+      : '<button class="btn btn-ghost btn-sm" style="font-size:.7rem;padding:4px 10px;" ' +
+          'onclick="cambiarRol(\'' + p.uid + '\')">' +
+          (p.rol === 'super' ? 'Quitar super' : 'Hacer super') + '</button>' +
+        '<button class="btn btn-red btn-sm" style="font-size:.7rem;padding:4px 10px;" ' +
+          'onclick="bajaDocente(\'' + p.uid + '\')">Dar de baja</button>';
+
+    return '<div style="display:flex;align-items:center;gap:8px;padding:9px 2px;' +
+           'border-bottom:1px solid var(--grisC);flex-wrap:wrap;">' +
+           '<span style="flex:1;min-width:150px;font-size:.85rem;">' + p.nombre + ' ' + badge + '</span>' +
+           acciones + '</div>';
+  }).join('');
+}
+
+async function altaDocente() {
+  const nombre = document.getElementById('np-nombre').value.trim();
+  const idea   = document.getElementById('np-idea').value.trim().toLowerCase();
+  const rol    = document.getElementById('np-rol').value;
+  const btn    = document.getElementById('np-btn');
+
+  if (!nombre)            { toast('Escribe el nombre', true); return; }
+  if (!idea)              { toast('Escribe el usuario IdEA', true); return; }
+  if (idea.length < 6)    { toast('El IdEA debe tener al menos 6 caracteres', true); return; }
+  if (!/^[a-z0-9._-]+$/.test(idea)) { toast('El IdEA tiene caracteres no válidos', true); return; }
+
+  btn.disabled = true; btn.textContent = 'Dando de alta…';
+  const email = idea + AUTH_DOMINIO;
+
+  try {
+    const sec = _appAlta();
+    let uid;
+    try {
+      const cred = await sec.auth().createUserWithEmailAndPassword(email, idea);
+      uid = cred.user.uid;
+    } catch (e) {
+      if (e.code === 'auth/email-already-in-use') {
+        // La cuenta ya existia: recuperamos su uid iniciando sesion aparte
+        const cred = await sec.auth().signInWithEmailAndPassword(email, idea);
+        uid = cred.user.uid;
+      } else { throw e; }
+    }
+    await sec.auth().signOut();
+
+    await window._db.ref(RUTA_PROFES + '/' + uid).set({
+      nombre: nombre, rol: rol, creado: new Date().toISOString()
+    });
+
+    document.getElementById('np-nombre').value = '';
+    document.getElementById('np-idea').value   = '';
+    document.getElementById('np-rol').value    = 'profesorado';
+    toast('✅ ' + nombre + ' ya tiene acceso');
+    await refrescarListaProfes();
+
+  } catch (e) {
+    console.warn('Alta fallida:', e.code, e.message);
+    if (e.code === 'auth/operation-not-allowed')
+      toast('Habilita Email/Contraseña en la consola de Firebase', true);
+    else if (e.code === 'auth/wrong-password')
+      toast('Ese IdEA ya existe con otra contraseña. Revísalo en la consola.', true);
+    else if (e.code === 'PERMISSION_DENIED' || /permission/i.test(e.message || ''))
+      toast('Sin permiso para escribir el listado. Revisa las reglas.', true);
+    else
+      toast('No se ha podido dar de alta: ' + (e.code || e.message), true);
+  } finally {
+    btn.disabled = false; btn.textContent = '➕ Dar de alta';
+  }
+}
+
+async function bajaDocente(uid) {
+  const p = PROFESORADO.find(function (x) { return x.uid === uid; });
+  if (!p) return;
+  if (currentUser && uid === currentUser.uid) {
+    toast('No puedes darte de baja a ti mismo', true); return;
+  }
+  if (!confirm('¿Retirar el acceso a ' + p.nombre + '?\n\n' +
+               'Dejará de poder entrar y de guardar datos de inmediato.')) return;
+  try {
+    await window._db.ref(RUTA_PROFES + '/' + uid).remove();
+    toast('Acceso retirado a ' + p.nombre.split(',')[0]);
+    await refrescarListaProfes();
+  } catch (e) {
+    toast('No se ha podido dar de baja: ' + e.message, true);
+  }
+}
+
+async function cambiarRol(uid) {
+  const p = PROFESORADO.find(function (x) { return x.uid === uid; });
+  if (!p) return;
+  const nuevo = p.rol === 'super' ? 'profesorado' : 'super';
+  try {
+    await window._db.ref(RUTA_PROFES + '/' + uid + '/rol').set(nuevo);
+    toast(p.nombre.split(',')[0] + ' → ' + (nuevo === 'super' ? 'superusuario' : 'profesorado'));
+    await refrescarListaProfes();
+  } catch (e) {
+    toast('No se ha podido cambiar el perfil: ' + e.message, true);
+  }
+}
+
+/* ---------- Compatibilidad ---------- */
+async function buildAuthMap() { return {}; }
+async function loadAuthHashes() { return; }
+async function saveAuthHash() { return; }
+
+/* ---------- Arranque ---------- */
+async function _initLoginUI() {
+  const aviso = document.getElementById('loginOffline');
+  const err   = document.getElementById('loginError');
+
+  if (window._firebaseReady === false) {
+    if (aviso) { aviso.textContent = 'Sin conexión con Firebase. No se puede iniciar sesión.'; aviso.classList.add('show'); }
+    return;
+  }
+
+  PROFESORADO = await cargarProfesorado();
+  poblarSelectProfesorado();
+
+  if (!PROFESORADO.length && err) {
+    err.textContent = 'No hay nadie dado de alta todavía. Usa la herramienta de alta inicial.';
+    err.classList.add('show');
+  }
+}
+
+window.addEventListener('load', function () {
+  if (window._firebaseReady !== undefined) _initLoginUI();
+  else document.addEventListener('firebase-ready', _initLoginUI);
 });
 </script>
 

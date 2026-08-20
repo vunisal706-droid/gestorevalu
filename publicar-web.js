@@ -267,8 +267,16 @@
   }
 
   /* ---------- Botón flotante ---------- */
+  /* Solo para el superusuario: publicar en el portal de transparencia
+     es una decisión de dirección, no una acción de uso diario. */
+  function esSuper() {
+    try { return typeof currentRol !== 'undefined' && currentRol === 'super'; } catch (e) {}
+    return window.currentRol === 'super';
+  }
+
   function montar() {
     if (document.querySelector('.pubweb-fab')) return;
+    if (!esSuper()) return;
     estilos();
     var b = document.createElement('button');
     b.className = 'pubweb-fab';
@@ -278,8 +286,16 @@
     document.body.appendChild(b);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montar);
-  else montar();
+  /* El rol no se conoce hasta que alguien entra, asi que se comprueba
+     periodicamente hasta que haya sesion iniciada. */
+  var _reintentos = 0;
+  function vigilar() {
+    if (document.querySelector('.pubweb-fab')) return;
+    if (esSuper()) { montar(); return; }
+    if (++_reintentos < 600) setTimeout(vigilar, 1000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', vigilar);
+  else vigilar();
 
   window.PublicarWeb = { calcular: calcular, abrir: abrir };
 })();
