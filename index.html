@@ -1103,6 +1103,16 @@ if ('serviceWorker' in navigator) {
           👥 Gestionar profesorado
         </button>
       </div>
+        <div style="background:#FFF5F5;border:1px solid #FECACA;border-radius:10px;padding:12px;margin-bottom:12px">
+          <div style="font-weight:700;color:#B91C1C;margin-bottom:6px">🗑️ Borrar las notas de un curso</div>
+          <div style="font-size:.78rem;color:var(--gris);margin-bottom:8px">Elige curso académico, trimestre y curso. Se borra aquí y en la nube.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <select id="bcAnyo" class="form-input" style="flex:1;min-width:110px" onchange="bcRellenar('anyo')"></select>
+            <select id="bcTrim" class="form-input" style="flex:1;min-width:90px" onchange="bcRellenar('trim')"></select>
+            <select id="bcCurso" class="form-input" style="flex:1;min-width:100px"></select>
+          </div>
+          <button class="btn btn-red btn-sm" style="margin-top:8px" onclick="borrarNotasCurso()">Borrar las notas de este curso</button>
+        </div>
         <button class="btn btn-red btn-sm" onclick="confirmClearData()">
           🗑️ Borrar todos los datos del trimestre activo
         </button>
@@ -1255,6 +1265,12 @@ function syncFromFirebase() {
       const anyo    = record.anyo || key.split('_')[0].replace(/-/g, '/');
       const trim    = record.trimestre;
       const cursoId = record.cursoId;
+
+      if (record.borrado) {
+        const loc = state.datos[anyo] && state.datos[anyo][trim] && state.datos[anyo][trim][cursoId];
+        if (loc && !((loc.updatedAt || '') > (record.updatedAt || ''))) { delete state.datos[anyo][trim][cursoId]; imported++; }
+        return;
+      }
 
       // Aseguramos que existe la estructura
       if (!state.datos[anyo])       state.datos[anyo] = {};
@@ -1414,6 +1430,7 @@ function showModal(id) {
     return;
   }
   document.getElementById(id).classList.add('open');
+  if (id === 'settingsModal') bcRellenar();
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -5528,6 +5545,46 @@ async function saveSettings() {
   toast('✅ Ajustes guardados');
 }
 
+// ── Borrar las notas de un curso concreto (solo superusuario) ──
+function bcRellenar(desde) {
+  const sa = document.getElementById('bcAnyo'), st = document.getElementById('bcTrim'), sc = document.getElementById('bcCurso');
+  if (!sa) return;
+  const D = state.datos || {};
+  if (!desde) {
+    const anyos = Object.keys(D).filter(a => Object.values(D[a] || {}).some(t => t && Object.keys(t).length)).sort().reverse();
+    sa.innerHTML = anyos.length ? anyos.map(a => `<option>${a}</option>`).join('') : '<option value="">Sin notas guardadas</option>';
+    if (anyos.includes(state.anyo)) sa.value = state.anyo;
+  }
+  if (!desde || desde === 'anyo') {
+    const ts = Object.keys(D[sa.value] || {}).filter(t => Object.keys(D[sa.value][t] || {}).length).sort();
+    st.innerHTML = ts.map(t => `<option value="${t}">${t}.º trimestre</option>`).join('');
+    if (ts.includes(String(state.trimestre))) st.value = String(state.trimestre);
+  }
+  const cs = Object.keys((D[sa.value] || {})[st.value] || {});
+  const orden = Object.keys(CURSOS_CONFIG);
+  cs.sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
+  sc.innerHTML = cs.map(c => `<option value="${c}">${(CURSOS_CONFIG[c] && CURSOS_CONFIG[c].label) || c}</option>`).join('');
+}
+function borrarNotasCurso() {
+  if (currentRol !== 'super') { toast('⛔ Solo el superusuario puede borrar notas', true); return; }
+  const anyo = document.getElementById('bcAnyo').value, trim = document.getElementById('bcTrim').value, cursoId = document.getElementById('bcCurso').value;
+  if (!anyo || !trim || !cursoId) { toast('No hay notas para borrar', true); return; }
+  const etiqueta = ((CURSOS_CONFIG[cursoId] && CURSOS_CONFIG[cursoId].label) || cursoId) + ' · ' + trim + '.º trimestre · ' + anyo;
+  if (!confirm('¿Borrar las notas de ' + etiqueta + '?\n\nSe borran aquí y en la nube. No se puede deshacer.')) return;
+  if (state.datos[anyo] && state.datos[anyo][trim]) delete state.datos[anyo][trim][cursoId];
+  saveState();
+  if (window._db) {
+    const fbKey = (anyo + '_T' + trim + '_' + cursoId).replace(/\//g, '-').replace(/\./g, '_');
+    // Se deja una marca de borrado para que los demás dispositivos también lo quiten
+    window._db.ref('evaluaciones/' + fbKey).set({ borrado: true, anyo: anyo, trimestre: Number(trim) || trim, cursoId: cursoId, updatedAt: new Date().toISOString() })
+      .then(() => toast('☁️ Borrado también en la nube'))
+      .catch(e => { console.warn(e); toast('⚠️ Borrado aquí, pero no en la nube', true); });
+  }
+  try { updateInicioDashboard(); populateCursosChips(); populateInformeSelects(); populateComparativaSelects(); populateAnyoSelect(); } catch (e) {}
+  bcRellenar();
+  toast('🗑️ Notas de ' + etiqueta + ' borradas');
+}
+
 function confirmClearData() {
   if (confirm(`¿Borrar TODOS los datos del Trimestre ${state.trimestre}? Esta acción no se puede deshacer.`)) {
     const y = state.anyo;
@@ -5664,6 +5721,21 @@ function entrar(ficha) {
   applyRolUI();
   init();
   if (typeof toast === 'function') toast('Sesión iniciada: ' + ficha.nombre.split(',')[0]);
+  if (currentRol === 'super') avisoNovedad();
+}
+
+// Aviso de novedades: sale una sola vez por dispositivo
+function avisoNovedad() {
+  const ID = 'gestorevalu-nov-2026-11-13';
+  try { if (localStorage.getItem('gestorevalu-novedades') === ID) return; localStorage.setItem('gestorevalu-novedades', ID); } catch (e) { return; }
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:380px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:inherit">' +
+    '<div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">✨ Novedad</div>' +
+    '<div style="line-height:1.5;font-size:.92rem">🗑️ En <b>Ajustes</b> ya puedes <b>borrar las notas de un curso</b> concreto (curso académico, trimestre y curso). Se borran también en la nube.</div>' +
+    '<button style="margin-top:14px;background:#1565C0;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer">Entendido</button></div>';
+  d.querySelector('button').onclick = () => d.remove();
+  document.body.appendChild(d);
 }
 
 function doLogout() {
