@@ -3609,7 +3609,7 @@ function generateInformeEjecutivo() {
       (CURSOS_CONFIG[id]||{label:id}).label,
       pct+'%',
       String(c.alumnos?.length||0),
-      pct>=20 ? '🔴 Alta' : pct>=10 ? '🟡 Media' : '🟢 Baja'
+      pct>=20 ? 'Alta' : pct>=10 ? 'Media' : 'Baja'
     ];
   });
   doc.autoTable({
@@ -5726,13 +5726,13 @@ function entrar(ficha) {
 
 // Aviso de novedades: sale una sola vez por dispositivo
 function avisoNovedad() {
-  const ID = 'gestorevalu-nov-2026-11-13';
+  const ID = 'gestorevalu-nov-2026-11-17';
   try { if (localStorage.getItem('gestorevalu-novedades') === ID) return; localStorage.setItem('gestorevalu-novedades', ID); } catch (e) { return; }
   const d = document.createElement('div');
   d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
   d.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:380px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:inherit">' +
     '<div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">✨ Novedad</div>' +
-    '<div style="line-height:1.5;font-size:.92rem">🗑️ En <b>Ajustes</b> ya puedes <b>borrar las notas de un curso</b> concreto (curso académico, trimestre y curso). Se borran también en la nube.</div>' +
+    '<div style="line-height:1.5;font-size:.92rem">📄 El <b>informe ejecutivo en PDF</b> ya muestra bien la columna de atención (Alta, Media, Baja), sin símbolos raros.</div>' +
     '<button style="margin-top:14px;background:#1565C0;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer">Entendido</button></div>';
   d.querySelector('button').onclick = () => d.remove();
   document.body.appendChild(d);
