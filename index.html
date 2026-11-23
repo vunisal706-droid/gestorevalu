@@ -1003,6 +1003,11 @@ if ('serviceWorker' in navigator) {
     </div>
     <input type="file" id="fileInput" accept=".docx,.odt,.pdf,.doc" style="display:none"
       onchange="handleFileSelect(this.files[0])">
+    <div id="imp-ejemplo" style="display:none;margin-top:12px;text-align:center">
+      <button type="button" class="btn btn-primary" onclick="probarActaEjemplo()">🧪 Cargar el acta de ejemplo de 6.º</button>
+      <a class="btn btn-ghost btn-sm" href="acta-ejemplo-sexto.docx" download style="margin-left:6px">📥 Descargar el acta de ejemplo</a>
+      <p style="font-size:12px;opacity:.75;margin-top:6px">6.º está vacío: descarga el acta y súbela como harías con la de Séneca, o cárgala directamente.</p>
+    </div>
   </div>
 
   <!-- Step 2: Course selector -->
@@ -1063,7 +1068,7 @@ if ('serviceWorker' in navigator) {
       <div id="quadrature-panel" style="text-align:left;margin:0 auto 24px;max-width:520px"></div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="resetImport()">📤 Importar otro curso</button>
-        <button class="btn btn-blue" onclick="showSection('cursos')">📊 Ver cursos</button>
+        <button class="btn btn-blue" onclick="showSection('cursos');try{if(state.imp&&state.imp.curso)selectCurso(state.imp.curso)}catch(e){}">📊 Ver resultados del curso</button>
         <button class="btn btn-green" onclick="showSection('informes')">📄 Generar informe</button>
       </div>
     </div>
@@ -2056,6 +2061,16 @@ function handleDrop(e) {
   if (file) handleFileSelect(file);
 }
 
+// Acta de ejemplo con nombres inventados (para la demostración)
+async function probarActaEjemplo() {
+  try {
+    const r = await fetch('acta-ejemplo-sexto.docx', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob();
+    handleFileSelect(new File([blob], 'acta-ejemplo-sexto.docx', { type: blob.type }));
+  } catch (e) { toast('⚠️ No se pudo cargar el acta de ejemplo', true); }
+}
+
 function handleFileSelect(file) {
   if (!file) return;
   state.imp.file = file;
@@ -2815,7 +2830,9 @@ function selectCurso(cursoId) {
       .reduce((a,g) => a+(ms[g]||0), 0);
     matPctMap[mat] = matTotal ? Math.round(matPos/matTotal*100) : 0;
   });
-  const matsSorted = c.mats.slice().sort((a,b) => matPctMap[b]-matPctMap[a]);
+  // Solo materias con alguna nota (si una no viene en el acta, no cuenta como «la más difícil»)
+  const matsConNotas = c.mats.filter(m => Object.values(stats.matStats[m] || {}).some(v => v > 0));
+  const matsSorted = (matsConNotas.length ? matsConNotas : c.mats).slice().sort((a,b) => matPctMap[b]-matPctMap[a]);
   const mejorMat = matsSorted[0];
   const peorMat = matsSorted[matsSorted.length-1];
 
@@ -5982,13 +5999,13 @@ function entrar(ficha) {
 // Aviso de novedades: sale una sola vez por dispositivo
 function avisoNovedad() {
   if (window._demo) return;
-  const ID = 'gestorevalu-nov-2026-11-18';
+  const ID = 'gestorevalu-nov-2026-11-23';
   try { if (localStorage.getItem('gestorevalu-novedades') === ID) return; localStorage.setItem('gestorevalu-novedades', ID); } catch (e) { return; }
   const d = document.createElement('div');
   d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
   d.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:380px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:inherit">' +
     '<div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">✨ Novedad</div>' +
-    '<div style="line-height:1.5;font-size:.92rem">🧪 <b>Modo demostración:</b> en la pantalla de entrada hay un botón para ver la app con notas inventadas y una guía que explica cada apartado y gráfica. Sirve para enseñarla a otros centros; no toca los datos reales.</div>' +
+    '<div style="line-height:1.5;font-size:.92rem">🧪 <b>Modo demostración:</b> 6.º empieza vacío para subir en directo un acta de ejemplo (nombres inventados) y ver cómo se cargan sus resultados.</div>' +
     '<button style="margin-top:14px;background:#1565C0;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer">Entendido</button></div>';
   d.querySelector('button').onclick = () => d.remove();
   document.body.appendChild(d);
@@ -6234,14 +6251,18 @@ function installPWA() {
       ant[t][cid] = { tipo: rec.tipo, mats, alumnos, stats: computeStats(alumnos, mats, rec.tipo), updatedAt: '2026-06-20T10:00:00.000Z' };
     });
   });
-  state.datos['2025/2026'] = ant; saveState();
+  state.datos['2025/2026'] = ant;
+  // 6.º empieza vacío: se carga en directo con el acta de ejemplo
+  delete act['6ep'];
+  saveState();
   try { const m = document.getElementById('comp-modo'); if (m) m.value = 'cursos'; } catch (e) { }
   entrar({ nombre: 'Demostración, Jefatura', rol: 'super', uid: 'demo' });
+  try { document.getElementById('imp-ejemplo').style.display = 'block'; } catch (e) { }
   window.DEMO.iniciar({
-    intro: 'Estás dentro de Gestión de Evaluaciones con las notas inventadas de <b>3.º a 6.º</b> (1.er trimestre de este curso y los tres del curso pasado). Solo hay números de lista, ningún nombre. Toca lo que quieras: <b>no se guarda nada</b>. Pulsa los <b>?</b> para saber qué hace cada apartado o gráfica.',
+    intro: 'Estás dentro de Gestión de Evaluaciones con las notas inventadas de <b>3.º a 5.º</b> (1.er trimestre de este curso y los tres del curso pasado). <b>6.º está vacío a propósito:</b> ve a <b>Importar Notas</b>, sube el acta de ejemplo y verás cómo se cargan sus resultados al momento. Solo hay números de lista, ningún nombre. Toca lo que quieras: <b>no se guarda nada</b>. Pulsa los <b>?</b> para saber qué hace cada apartado o gráfica.',
     guia: [
       { sel: '#tab-inicio', ir: () => showSection('inicio'), titulo: 'Inicio', texto: 'El resumen del centro: alumnado evaluado, % de aprobados, suspensos y qué cursos necesitan más atención.' },
-      { sel: '#tab-importar', ir: () => showSection('importar'), titulo: 'Importar notas', texto: 'Aquí se suben las actas de Séneca (Word o PDF) de cada curso y trimestre. La app lee las notas sola.', como: 'Exporta el acta de calificaciones desde Séneca, arrástrala aquí, revisa la vista previa y pulsa guardar. Los nombres no se guardan: solo el número de lista.' },
+      { sel: '#tab-importar', ir: () => showSection('importar'), titulo: 'Importar notas', texto: 'Aquí se suben las actas de Séneca (Word o PDF) de cada curso y trimestre. La app lee las notas sola.', como: 'Exporta el acta de calificaciones desde Séneca, arrástrala aquí, revisa la vista previa y pulsa guardar. Para probarlo, descarga el acta de ejemplo de 6.º (nombres inventados) y súbela: 6.º está vacío y verás cómo aparecen sus resultados. Los nombres no se guardan: solo el número de lista.' },
       { sel: '#tab-cursos', ir: () => showSection('cursos'), titulo: 'Cursos y gráficas', texto: 'Por curso: notas de cada alumno/a, % de aprobados por área y gráficas de la distribución de notas (IN, SU, BI, NT, SB).', como: 'Elige el curso arriba. Las barras de cada área enseñan dónde se concentran los suspensos.' },
       { sel: '#tab-informes', ir: () => showSection('informes'), titulo: 'Informes', texto: 'El informe de evaluación del trimestre para el claustro y la inspección, y el <b>informe ejecutivo en PDF</b> con gráficas y nivel de atención por curso.', como: 'Elige trimestre y curso (o todo el centro) y pulsa generar. Sale listo para imprimir.' },
       { sel: '#tab-comparativa', ir: () => { showSection('comparativa'); const m = document.getElementById('comp-modo'); if (m && m.value !== 'cursos') { m.value = 'cursos'; onCompModoChange(); } }, titulo: 'Comparativa', texto: 'Cómo evoluciona cada grupo: entre trimestres y frente al curso pasado. Sirve para ver si las medidas funcionan.', como: 'Elige qué comparar. En la demo hay datos del curso pasado para comparar el mismo curso y trimestre.' },

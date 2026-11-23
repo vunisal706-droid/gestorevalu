@@ -1,7 +1,7 @@
 // ╔══════════════════════════════════════════════╗
 // ║  Service Worker – Capitulaciones PWA         ║
 // ╚══════════════════════════════════════════════╝
-const CACHE_NAME = 'capitulaciones-v3-b2611181145';
+const CACHE_NAME = 'capitulaciones-v3-b2611231310';
 const ASSETS_TO_CACHE = [
   './',
   './index.html'
